@@ -8,7 +8,6 @@ import {
   Legend,
   Pie,
   PieChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -114,10 +113,10 @@ export default function LanguageChart({ stats }: Props) {
         </div>
       </div>
 
-      <div className="h-80 min-w-0 rounded-lg border border-gray-100 bg-white">
-        <ResponsiveContainer width="100%" height="100%" minWidth={300} minHeight={300}>
+      <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
+        <div className="h-80 min-w-[760px]">
           {mode === "pie" ? (
-            <PieChart>
+            <PieChart width={760} height={320}>
               <Pie
                 data={pieData}
                 dataKey="value"
@@ -145,7 +144,13 @@ export default function LanguageChart({ stats }: Props) {
               <Legend layout="vertical" align="right" verticalAlign="middle" />
             </PieChart>
           ) : (
-            <BarChart data={barData} layout="vertical" margin={{ top: 16, right: 24, bottom: 16, left: 80 }}>
+            <BarChart
+              width={760}
+              height={320}
+              data={barData}
+              layout="vertical"
+              margin={{ top: 16, right: 24, bottom: 16, left: 80 }}
+            >
               <XAxis type="number" tickFormatter={compactNumber} />
               <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12 }} />
               <Tooltip
@@ -155,7 +160,7 @@ export default function LanguageChart({ stats }: Props) {
               <Bar dataKey="count" name="レビュー数" radius={[0, 6, 6, 0]} fill="#2563eb" />
             </BarChart>
           )}
-        </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );

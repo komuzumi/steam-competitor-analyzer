@@ -2,6 +2,21 @@ import { LanguageStat, PublicReview, SteamReview } from "@/types";
 
 const STEAM_STORE_API = "https://store.steampowered.com/api";
 const STEAM_REVIEW_API = "https://store.steampowered.com/appreviews";
+const STEAM_FETCH_TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = STEAM_FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export const STEAM_LANGUAGES = [
   { code: "english", name: "English" },
@@ -169,7 +184,7 @@ export function extractEditionPrices(details: SteamAppDetails): EditionPrice[] {
 }
 
 export async function fetchAppDetails(appId: string, cc: string = "jp"): Promise<SteamAppDetails> {
-  const res = await fetch(`${STEAM_STORE_API}/appdetails?appids=${appId}&cc=${cc}&l=english`, {
+  const res = await fetchWithTimeout(`${STEAM_STORE_API}/appdetails?appids=${appId}&cc=${cc}&l=english`, {
     next: { revalidate: 3600 },
   });
 
@@ -207,7 +222,7 @@ export async function fetchReviewSummary(
     review_type: "all",
   });
 
-  const res = await fetch(`${STEAM_REVIEW_API}/${appId}?${params}`);
+  const res = await fetchWithTimeout(`${STEAM_REVIEW_API}/${appId}?${params}`);
   if (!res.ok) {
     throw new Error(`Steam Review API error: ${res.status}`);
   }
@@ -246,7 +261,11 @@ async function mapWithConcurrency<T, R>(
 export async function fetchLanguageStats(appId: string, allSummary?: ReviewSummary): Promise<LanguageStat[]> {
   const summary = allSummary ?? (await fetchReviewSummary(appId));
   const knownStats = await mapWithConcurrency(STEAM_LANGUAGES, 5, async (language) => {
-    const langSummary = await fetchReviewSummary(appId, language.code);
+    const langSummary = await fetchReviewSummary(appId, language.code).catch(() => ({
+      totalReviews: 0,
+      totalPositive: 0,
+      totalNegative: 0,
+    }));
     return {
       language: language.code,
       displayName: language.name,
@@ -307,7 +326,7 @@ export async function fetchReviews(
     params.set("day_range", String(options.dayRange));
   }
 
-  const res = await fetch(`${STEAM_REVIEW_API}/${appId}?${params}`);
+  const res = await fetchWithTimeout(`${STEAM_REVIEW_API}/${appId}?${params}`);
   if (!res.ok) {
     throw new Error(`Steam Review API error: ${res.status}`);
   }

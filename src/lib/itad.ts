@@ -5,6 +5,22 @@ interface ITADHistoricalLow {
   date: string;
 }
 
+const ITAD_FETCH_TIMEOUT_MS = 10_000;
+
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ITAD_FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function fetchHistoricalLow(appId: string, country: string = "JP"): Promise<ITADHistoricalLow | null> {
   const apiKey = process.env.ITAD_API_KEY;
   if (!apiKey) {
@@ -13,7 +29,7 @@ export async function fetchHistoricalLow(appId: string, country: string = "JP"):
 
   try {
     // Step 1: Steam AppIDからITADのゲームIDを取得
-    const lookupRes = await fetch(
+    const lookupRes = await fetchWithTimeout(
       `https://api.isthereanydeal.com/games/lookup/v1?key=${encodeURIComponent(apiKey)}&appid=${appId}`
     );
 
@@ -24,7 +40,7 @@ export async function fetchHistoricalLow(appId: string, country: string = "JP"):
     if (!gameId) return null;
 
     // Step 2: 過去最低価格を取得
-    const lowRes = await fetch(
+    const lowRes = await fetchWithTimeout(
       `https://api.isthereanydeal.com/games/storelow/v2?key=${encodeURIComponent(apiKey)}&country=${country}`,
       {
         method: "POST",
