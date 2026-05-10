@@ -30,6 +30,15 @@ export default function Home() {
     abortRef.current?.abort();
     const abort = new AbortController();
     abortRef.current = abort;
+    let timedOut = false;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const resetStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        timedOut = true;
+        abort.abort();
+      }, 90_000);
+    };
 
     setIsLoading(true);
     setResults([]);
@@ -38,6 +47,7 @@ export default function Home() {
     setProgress({});
 
     try {
+      resetStallTimer();
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -67,6 +77,7 @@ export default function Home() {
         for (const chunk of lines) {
           const line = chunk.trim();
           if (!line.startsWith("data: ")) continue;
+          resetStallTimer();
 
           const json = line.slice(6);
           let event: SSEEvent;
@@ -110,9 +121,14 @@ export default function Home() {
         }
       }
     } catch (err) {
+      if (timedOut) {
+        setGlobalError("分析がタイムアウトしました。通信状態を確認して、もう一度試してください。");
+        return;
+      }
       if ((err as Error).name === "AbortError") return;
       setGlobalError(err instanceof Error ? err.message : "予期せぬエラーが発生しました");
     } finally {
+      if (stallTimer) clearTimeout(stallTimer);
       setIsLoading(false);
       setProgress({});
     }
