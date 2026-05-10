@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import InputForm from "@/components/InputForm";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import TitleCard from "@/components/TitleCard";
@@ -26,11 +26,19 @@ export default function Home() {
   const [progress, setProgress] = useState<Record<string, ProgressItem>>({});
   const abortRef = useRef<AbortController | null>(null);
 
-  const handleSubmit = useCallback(async (appIds: string[], reviewLimit: number) => {
-    // 前回のリクエストをキャンセル
+  const handleSubmit = useCallback(async (appIds: string[]) => {
     abortRef.current?.abort();
     const abort = new AbortController();
     abortRef.current = abort;
+    let timedOut = false;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const resetStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        timedOut = true;
+        abort.abort();
+      }, 90_000);
+    };
 
     setIsLoading(true);
     setResults([]);
@@ -39,10 +47,11 @@ export default function Home() {
     setProgress({});
 
     try {
+      resetStallTimer();
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appIds, reviewLimit }),
+        body: JSON.stringify({ appIds }),
         signal: abort.signal,
       });
 
@@ -62,14 +71,13 @@ export default function Home() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-
-        // SSEメッセージをパース
         const lines = buffer.split("\n\n");
         buffer = lines.pop() || "";
 
         for (const chunk of lines) {
           const line = chunk.trim();
           if (!line.startsWith("data: ")) continue;
+          resetStallTimer();
 
           const json = line.slice(6);
           let event: SSEEvent;
@@ -93,7 +101,6 @@ export default function Home() {
               break;
             case "result":
               setResults((prev) => [...prev, event.data]);
-              // 完了したタイトルを進捗から除去
               setProgress((prev) => {
                 const next = { ...prev };
                 delete next[event.data.appId];
@@ -114,11 +121,14 @@ export default function Home() {
         }
       }
     } catch (err) {
+      if (timedOut) {
+        setGlobalError("分析がタイムアウトしました。通信状態を確認して、もう一度試してください。");
+        return;
+      }
       if ((err as Error).name === "AbortError") return;
-      setGlobalError(
-        err instanceof Error ? err.message : "予期せぬエラーが発生しました"
-      );
+      setGlobalError(err instanceof Error ? err.message : "予期せぬエラーが発生しました");
     } finally {
+      if (stallTimer) clearTimeout(stallTimer);
       setIsLoading(false);
       setProgress({});
     }
@@ -126,35 +136,27 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gray-100">
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        {/* ヘッダー */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">
-            Steam 競合調査AIレポート
-          </h1>
-          <p className="mt-2 text-gray-600 text-sm">
-            Steam URLまたはAppIDを入力すると、レビュー全件取得・仮説売上・AI要約レポートを生成します
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <div className="mb-8 text-center">
+          <h1 className="text-3xl font-bold text-gray-900">Steam 競合調査AIレポート</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Steam URLまたはAppIDを入力すると、価格・レビュー分布・仮説売上を取得します。AI分析と全文CSVは必要な時だけ実行します。
           </p>
         </div>
 
-        {/* 入力フォーム */}
         <InputForm onSubmit={handleSubmit} isLoading={isLoading} />
 
-        {/* エラー表示 */}
         {globalError && (
-          <div className="mt-6 bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-            <p className="text-red-700 text-sm">{globalError}</p>
+          <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-center">
+            <p className="text-sm text-red-700">{globalError}</p>
           </div>
         )}
 
         {errors.length > 0 && (
           <div className="mt-6 space-y-2">
             {errors.map((err) => (
-              <div
-                key={err.appId}
-                className="bg-yellow-50 border border-yellow-200 rounded-lg p-3"
-              >
-                <p className="text-yellow-800 text-sm">
+              <div key={err.appId} className="rounded-lg border border-yellow-200 bg-yellow-50 p-3">
+                <p className="text-sm text-yellow-800">
                   AppID {err.appId}: {err.message}
                 </p>
               </div>
@@ -162,26 +164,20 @@ export default function Home() {
           </div>
         )}
 
-        {/* ローディング・進捗 */}
         {isLoading && <LoadingSpinner progress={progress} />}
 
-        {/* 結果表示 */}
         {results.length > 0 && (
           <div className="mt-8 space-y-6">
-            {/* 通貨切り替え */}
             <div className="flex justify-end">
               <CurrencySelector value={currency} onChange={setCurrency} />
             </div>
 
-            {/* 比較テーブル */}
             {!isLoading && <ComparisonTable results={results} currency={currency} />}
 
-            {/* タイトル別カード */}
             {results.map((result) => (
               <TitleCard key={result.appId} data={result} currency={currency} />
             ))}
 
-            {/* Markdownエクスポート */}
             {!isLoading && <MarkdownExport results={results} currency={currency} />}
           </div>
         )}

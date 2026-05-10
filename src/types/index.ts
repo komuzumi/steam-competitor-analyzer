@@ -9,6 +9,9 @@ export interface SteamReview {
   review: string;
   voted_up: boolean;
   timestamp_created: number;
+  timestamp_updated?: number;
+  votes_up?: number;
+  weighted_vote_score?: string;
 }
 
 export interface ReviewSummary {
@@ -20,6 +23,7 @@ export interface ReviewSummary {
 
 export interface LanguageStat {
   language: string;
+  displayName?: string;
   count: number;
   positive: number;
   negative: number;
@@ -78,6 +82,19 @@ export interface GameAnalysis {
   editions: EditionInfo[];
   reviewSamples: { text: string; language: string; votedUp: boolean; playtime: number }[];
   aiSummary?: AISummaryResult;
+}
+
+export interface PublicReview {
+  recommendationid: string;
+  language: string;
+  review: string;
+  voted_up: boolean;
+  timestamp_created: number;
+  timestamp_updated?: number;
+  votes_up: number;
+  weighted_vote_score: number;
+  playtime_forever: number;
+  playtime_at_review: number;
 }
 
 export interface AnalysisResponse {
