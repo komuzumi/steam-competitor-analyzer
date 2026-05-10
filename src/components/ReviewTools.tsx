@@ -54,8 +54,21 @@ function downloadText(filename: string, text: string, type: string) {
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadFromUrl(url: string, filename: string) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function reviewRank(review: PublicReview): number {
@@ -262,6 +275,19 @@ export default function ReviewTools({ data }: Props) {
   async function handleCsvDownload() {
     setCsvStatus("");
     try {
+      if (!reviewCache) {
+        const params = new URLSearchParams({
+          appId: data.appId,
+          name: data.name,
+        });
+        downloadFromUrl(
+          `/api/reviews/csv?${params}`,
+          `${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`,
+        );
+        setCsvStatus("CSVダウンロードを開始しました。未取得の場合はサーバーから直接生成します。");
+        return;
+      }
+
       const reviews = await fetchFullReviews();
       const csv = makeCsv(reviews);
       downloadText(`${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`, csv, "text/csv;charset=utf-8");
