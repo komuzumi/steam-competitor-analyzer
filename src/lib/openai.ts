@@ -44,13 +44,33 @@ ${reviewCorpus}
 }`;
 }
 
+function normalizeSummaryField(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).join("\n");
+  }
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  return String(value);
+}
+
+function normalizeSummary(value: unknown): AISummaryResult {
+  const raw = value as Partial<Record<keyof AISummaryResult, unknown>>;
+  return {
+    positiveReasons: normalizeSummaryField(raw.positiveReasons),
+    negativeReasons: normalizeSummaryField(raw.negativeReasons),
+    frequentComplaints: normalizeSummaryField(raw.frequentComplaints),
+    planningInsights: normalizeSummaryField(raw.planningInsights),
+    globalExpansionNotes: normalizeSummaryField(raw.globalExpansionNotes),
+  };
+}
+
 function safeParseSummary(content: string): AISummaryResult {
   try {
-    return JSON.parse(content) as AISummaryResult;
+    return normalizeSummary(JSON.parse(content));
   } catch {
     const match = content.match(/\{[\s\S]*\}/);
     if (!match) throw new Error("Gemini API のJSONレスポンスを解析できませんでした");
-    return JSON.parse(match[0]) as AISummaryResult;
+    return normalizeSummary(JSON.parse(match[0]));
   }
 }
 

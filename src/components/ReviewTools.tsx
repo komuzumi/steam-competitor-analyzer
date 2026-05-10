@@ -80,8 +80,10 @@ function compactReview(review: PublicReview): string {
   return `[${review.language}] (${review.voted_up ? "positive" : "negative"}, playtime: ${playtime}h, helpful: ${review.votes_up}) ${review.review.slice(0, 350)}`;
 }
 
-function formatAiReportText(content: string): string {
-  return content
+function formatAiReportText(content: unknown): string {
+  const text = Array.isArray(content) ? content.map((item) => String(item)).join("\n") : String(content ?? "");
+
+  return text
     .replace(/\r\n/g, "\n")
     .replace(/([。！？!?])\s*(?!\n|$)/g, "$1\n")
     .replace(/\n{3,}/g, "\n\n")
