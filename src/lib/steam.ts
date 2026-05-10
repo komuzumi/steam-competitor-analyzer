@@ -21,6 +21,18 @@ export function extractAppId(input: string): string | null {
   return null;
 }
 
+interface PackageSub {
+  packageid: number;
+  percent_savings: number;
+  percent_savings_text: string;
+  option_text: string;
+  price_in_cents_with_discount: number;
+}
+
+interface PackageGroup {
+  subs: PackageSub[];
+}
+
 export interface SteamAppDetails {
   name: string;
   header_image: string;
@@ -34,6 +46,88 @@ export interface SteamAppDetails {
     date: string;
   };
   is_free: boolean;
+  package_groups?: PackageGroup[];
+}
+
+function cleanPackageName(optionText: string): string {
+  return optionText
+    .replace(/<[^>]*>/g, "")
+    .replace(/S\$[\s]*[\d,.]+/g, "")
+    .replace(/[¥$€£][\s]*[\d,.]+/g, "")
+    .replace(/\s*-\s*$/, "")
+    .trim();
+}
+
+function parseDiscountText(text: string): number {
+  const match = text.match(/-(\d+)%/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+export interface EditionPrice {
+  name: string;
+  displayName: string;
+  packageId: number;
+  isStandard: boolean;
+  basePrice: number;
+  currentPrice: number;
+  discountPercent: number;
+}
+
+export function extractEditionPrices(details: SteamAppDetails): EditionPrice[] {
+  const subs = details.package_groups?.[0]?.subs;
+
+  if (!subs?.length) {
+    if (!details.price_overview) return [];
+    return [{
+      name: details.name,
+      displayName: "通常版",
+      packageId: 0,
+      isStandard: true,
+      basePrice: details.price_overview.initial / 100,
+      currentPrice: details.price_overview.final / 100,
+      discountPercent: details.price_overview.discount_percent,
+    }];
+  }
+
+  const gameName = details.name.toLowerCase();
+  const editionKeywords = /\b(edition|bundle|pack|deluxe|premium|ultimate|legendary|gold|platinum|complete|collection|goty)\b/i;
+
+  const editions = subs.map(sub => {
+    const cleaned = cleanPackageName(sub.option_text);
+    const isNameMatch = cleaned.toLowerCase() === gameName;
+    const discount = parseDiscountText(sub.percent_savings_text);
+    const currentPrice = sub.price_in_cents_with_discount / 100;
+    const basePrice = discount > 0 ? Math.round(currentPrice / (1 - discount / 100) * 100) / 100 : currentPrice;
+
+    const prefix = details.name + " - ";
+    const displayName = isNameMatch
+      ? "通常版"
+      : cleaned.startsWith(prefix) ? cleaned.slice(prefix.length) : cleaned;
+
+    return {
+      name: cleaned,
+      displayName,
+      packageId: sub.packageid,
+      isStandard: isNameMatch,
+      basePrice,
+      currentPrice,
+      discountPercent: discount,
+    };
+  });
+
+  if (!editions.some(e => e.isStandard)) {
+    const candidate = editions.find(e => !editionKeywords.test(e.name));
+    if (candidate) {
+      candidate.isStandard = true;
+      candidate.displayName = "通常版";
+    } else {
+      editions[0].isStandard = true;
+    }
+  }
+
+  editions.sort((a, b) => a.basePrice - b.basePrice);
+
+  return editions;
 }
 
 export async function fetchAppDetails(appId: string, cc: string = "jp"): Promise<SteamAppDetails> {

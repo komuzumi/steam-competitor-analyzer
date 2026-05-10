@@ -5,12 +5,13 @@ import {
   fetchSteamPurchaseReviewCount,
   aggregateByLanguage,
   parseReleaseYear,
+  extractEditionPrices,
 } from "@/lib/steam";
 import { estimateSales } from "@/lib/sales";
 import { summarizeReviews } from "@/lib/openai";
 import { fetchHistoricalLow } from "@/lib/itad";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
-import { GameAnalysis, CurrencyPriceInfo, SSEEvent } from "@/types";
+import { GameAnalysis, CurrencyPriceInfo, EditionInfo, SSEEvent } from "@/types";
 
 export const maxDuration = 300;
 
@@ -43,26 +44,41 @@ export async function POST(req: NextRequest) {
                 fetchAppDetails(appId, opt.steamCC),
                 fetchHistoricalLow(appId, opt.itadCountry),
               ]);
-              const basePrice = details.is_free ? 0 : (details.price_overview?.initial || 0) / 100;
-              const currentPrice = details.is_free ? 0 : (details.price_overview?.final || 0) / 100;
-              const discountPercent = details.price_overview?.discount_percent || 0;
-              const info: CurrencyPriceInfo = {
-                basePrice,
-                currentPrice,
-                discountPercent,
-                historicalLow: historicalLow?.price ?? null,
-                historicalLowDate: historicalLow?.date ?? null,
-              };
-              return { code: opt.code, info, details };
+              return { code: opt.code, details, historicalLow };
             })
           );
 
-          const prices: Record<string, CurrencyPriceInfo> = {};
-          for (const pr of priceResults) {
-            prices[pr.code] = pr.info;
-          }
-
           const details = priceResults[0].details;
+
+          // エディション別価格を構築
+          const editionTemplates = extractEditionPrices(details);
+          const editions: EditionInfo[] = editionTemplates.map(template => {
+            const editionPrices: Record<string, CurrencyPriceInfo> = {};
+            for (const pr of priceResults) {
+              const currEditions = extractEditionPrices(pr.details);
+              const matching = currEditions.find(e => e.packageId === template.packageId);
+              if (matching) {
+                editionPrices[pr.code] = {
+                  basePrice: pr.details.is_free ? 0 : matching.basePrice,
+                  currentPrice: pr.details.is_free ? 0 : matching.currentPrice,
+                  discountPercent: matching.discountPercent,
+                  historicalLow: template.isStandard ? (pr.historicalLow?.price ?? null) : null,
+                  historicalLowDate: template.isStandard ? (pr.historicalLow?.date ?? null) : null,
+                };
+              }
+            }
+            return {
+              name: template.name,
+              displayName: template.displayName,
+              packageId: template.packageId,
+              isStandard: template.isStandard,
+              prices: editionPrices,
+            };
+          });
+
+          // 通常版の価格（売上推定・比較テーブル用）
+          const standardEdition = editions.find(e => e.isStandard) || editions[0];
+          const prices: Record<string, CurrencyPriceInfo> = standardEdition?.prices ?? {};
           const gameName = details.name;
 
           send({ type: "progress", appId, appName: gameName, phase: "ストア情報の取得完了" });
@@ -136,6 +152,7 @@ export async function POST(req: NextRequest) {
             languageStats,
             salesEstimate,
             prices,
+            editions,
             reviewSamples,
             aiSummary,
           };

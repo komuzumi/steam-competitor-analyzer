@@ -53,6 +53,14 @@ export interface CurrencyPriceInfo {
   historicalLowDate: string | null;
 }
 
+export interface EditionInfo {
+  name: string;
+  displayName: string;
+  packageId: number;
+  isStandard: boolean;
+  prices: Record<string, CurrencyPriceInfo>;
+}
+
 export interface GameAnalysis {
   appId: string;
   name: string;
@@ -67,6 +75,7 @@ export interface GameAnalysis {
   languageStats: LanguageStat[];
   salesEstimate: SalesEstimate;
   prices: Record<string, CurrencyPriceInfo>;
+  editions: EditionInfo[];
   reviewSamples: { text: string; language: string; votedUp: boolean; playtime: number }[];
   aiSummary?: AISummaryResult;
 }

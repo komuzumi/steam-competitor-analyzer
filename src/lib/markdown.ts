@@ -40,7 +40,22 @@ export function generateMarkdownReport(results: GameAnalysis[], currency: Curren
     lines.push("");
     lines.push(`- **AppID:** ${r.appId}`);
     lines.push(`- **発売日:** ${r.releaseDate}`);
-    if (p) {
+
+    if (r.editions.length > 0) {
+      lines.push("");
+      lines.push("### 価格情報（エディション別）");
+      lines.push("| エディション | 定価 | 現在価格 | 過去最低 |");
+      lines.push("|---|---|---|---|");
+      for (const edition of r.editions) {
+        const ep = edition.prices[currency];
+        if (!ep) continue;
+        const currentCol = ep.discountPercent > 0
+          ? `${fp(ep.currentPrice)} (-${ep.discountPercent}%)`
+          : fp(ep.currentPrice);
+        const lowCol = ep.historicalLow !== null ? fp(ep.historicalLow) : "---";
+        lines.push(`| ${edition.displayName} | ${fp(ep.basePrice)} | ${currentCol} | ${lowCol} |`);
+      }
+    } else if (p) {
       lines.push(`- **定価:** ${fp(p.basePrice)}`);
       lines.push(`- **現在価格:** ${fp(p.currentPrice)}${p.discountPercent > 0 ? ` (-${p.discountPercent}%)` : ""}`);
       lines.push(`- **過去最低価格:** ${p.historicalLow !== null ? `${fp(p.historicalLow)}${p.historicalLowDate ? ` (${p.historicalLowDate})` : ""}` : "不明"}`);

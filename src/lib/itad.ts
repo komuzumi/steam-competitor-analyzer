@@ -43,9 +43,12 @@ export async function fetchHistoricalLow(appId: string, country: string = "JP"):
     const steamLow = entry.lows.find((l: { shop: { name: string } }) => l.shop?.name === "Steam");
     const best = steamLow || entry.lows[0];
 
+    const raw: string = best.timestamp ?? "";
+    const dateOnly = raw.includes("T") ? raw.split("T")[0] : raw;
+
     return {
       price: best.price?.amount ?? 0,
-      date: best.timestamp ?? "",
+      date: dateOnly,
     };
   } catch {
     return null;

@@ -38,23 +38,42 @@ export default function TitleCard({ data, currency }: Props) {
       </div>
 
       <div className="p-5 space-y-5">
-        {/* 価格情報 */}
-        {priceInfo && (
+        {/* 価格情報（エディション別） */}
+        {data.editions.length > 0 && (
           <div>
             <h4 className="font-semibold text-gray-800 mb-2">価格情報</h4>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <Stat label="定価" value={fp(priceInfo.basePrice)} />
-              <Stat
-                label="現在の販売価格"
-                value={fp(priceInfo.currentPrice)}
-                color={priceInfo.discountPercent > 0 ? "text-green-600" : undefined}
-                sub={priceInfo.discountPercent > 0 ? `-${priceInfo.discountPercent}%` : undefined}
-              />
-              <Stat
-                label="過去最低価格"
-                value={priceInfo.historicalLow !== null ? fp(priceInfo.historicalLow) : "---"}
-                sub={priceInfo.historicalLowDate || undefined}
-              />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-2 px-2 text-gray-600">エディション</th>
+                    <th className="text-right py-2 px-2 text-gray-600">定価</th>
+                    <th className="text-right py-2 px-2 text-gray-600">現在価格</th>
+                    <th className="text-right py-2 px-2 text-gray-600">過去最低</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.editions.map((edition) => {
+                    const ep = edition.prices[currency];
+                    if (!ep) return null;
+                    return (
+                      <tr key={edition.packageId} className={`border-b border-gray-100 ${edition.isStandard ? "bg-blue-50" : ""}`}>
+                        <td className="py-2 px-2 text-gray-700 font-medium">
+                          {edition.displayName}
+                        </td>
+                        <td className="text-right py-2 px-2 text-gray-800">{fp(ep.basePrice)}</td>
+                        <td className={`text-right py-2 px-2 ${ep.discountPercent > 0 ? "text-green-600 font-medium" : "text-gray-800"}`}>
+                          {fp(ep.currentPrice)}
+                          {ep.discountPercent > 0 && <span className="text-xs ml-1">(-{ep.discountPercent}%)</span>}
+                        </td>
+                        <td className="text-right py-2 px-2 text-gray-800">
+                          {ep.historicalLow !== null ? fp(ep.historicalLow) : "---"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
