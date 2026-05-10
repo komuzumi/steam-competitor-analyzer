@@ -7,7 +7,7 @@ Steam上の競合タイトルを調査し、レビュー傾向・言語別反応
 ### 前提条件
 
 - Node.js 18以上
-- OpenAI APIキー
+- Gemini APIキー
 
 ### インストール
 
@@ -18,10 +18,10 @@ npm install
 
 ### .env.localの設定
 
-プロジェクトルートに `.env.local` ファイルを作成し、OpenAI APIキーを設定します。
+プロジェクトルートに `.env.local` ファイルを作成し、Gemini APIキーを設定します。
 
 ```
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Gemini_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 `.env.local.example` をコピーして使うこともできます：
@@ -56,11 +56,10 @@ npm run dev
 
 ## 現時点の制限
 
-- **Steam API制限**: レビューは最大300件（100件x3ページ）のサンプルで分析。言語別集計はサンプル内の比率です。
+- **Steam API制限**: レビューの取得数は選択肢から選択可能。言語別集計はサンプル内の比率です。
 - **レート制限**: Steam APIのレート制限により、複数タイトルの同時分析は時間がかかります。
 - **仮説売上**: Boxleiterメソッドベースの推定であり、実際の売上とは異なります。参考値としてお使いください。
-- **価格**: 米ドル（USD）表示です。日本円表示には対応していません。
-- **AI要約**: OpenAI APIキーが未設定の場合、AI要約セクションはスキップされます。
+- **AI要約**: Gemini APIキーが未設定の場合、AI要約セクションはスキップされます。
 - **認証なし**: ログイン機能はありません。
 - **データ保存なし**: 分析結果はブラウザ上のみで保持され、リロードで消えます。
 
