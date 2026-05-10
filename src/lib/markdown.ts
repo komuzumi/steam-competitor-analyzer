@@ -81,7 +81,7 @@ export function generateMarkdownReport(results: GameAnalysis[], currency: Curren
       lines.push("|---|---|---|---|");
       for (const lang of r.languageStats.slice(0, 15)) {
         lines.push(
-          `| ${lang.language} | ${lang.count} | ${lang.positive} | ${lang.negative} |`
+          `| ${lang.displayName ?? lang.language} | ${lang.count} | ${lang.positive} | ${lang.negative} |`
         );
       }
       lines.push("");

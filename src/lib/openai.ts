@@ -1,60 +1,84 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { AISummaryResult, SteamReview } from "@/types";
+import { AISummaryResult, PublicReview, SteamReview } from "@/types";
 
-export async function summarizeReviews(
-  gameName: string,
-  reviews: SteamReview[]
-): Promise<AISummaryResult> {
+function getModel() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEYが設定されていません。.env.localを確認してください。");
+    throw new Error("GEMINI_API_KEY が設定されていません。.env.local を確認してください。");
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
+  return genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     generationConfig: {
       temperature: 0.3,
       responseMimeType: "application/json",
     },
   });
+}
 
-  // レビューをポジティブ・ネガティブに分ける
-  const positiveReviews = reviews.filter((r) => r.voted_up).slice(0, 30);
-  const negativeReviews = reviews.filter((r) => !r.voted_up).slice(0, 30);
+function formatReview(review: SteamReview | PublicReview): string {
+  const playtime =
+    "author" in review
+      ? Math.round((review.author?.playtime_forever ?? 0) / 60)
+      : Math.round(review.playtime_forever / 60);
+  const votesUp = Number(review.votes_up ?? 0);
+  return `[${review.language}] (${review.voted_up ? "positive" : "negative"}, playtime: ${playtime}h, helpful: ${votesUp}) ${review.review.slice(0, 350)}`;
+}
 
-  const formatReviews = (revs: SteamReview[]) =>
-    revs
-      .map(
-        (r) =>
-          `[${r.language}] (プレイ時間: ${Math.round(r.author.playtime_forever / 60)}時間) ${r.review.slice(0, 300)}`
-      )
-      .join("\n---\n");
+function buildPrompt(gameName: string, reviewCorpus: string, corpusLabel: string): string {
+  return `あなたはゲーム業界のアナリストです。Steamゲーム「${gameName}」のユーザーレビューを分析してください。
 
-  const prompt = `あなたはゲーム業界のアナリストです。以下はSteamゲーム「${gameName}」のユーザーレビューです。
-これらのレビューを分析し、日本語で以下の5項目をまとめてください。
+以下のレビュー情報は「${corpusLabel}」です。日本語で、競合調査・企画判断に使える具体性を優先してください。
 
-## 高評価レビュー:
-${formatReviews(positiveReviews)}
+## レビュー情報
+${reviewCorpus}
 
-## 低評価レビュー:
-${formatReviews(negativeReviews)}
-
-以下の形式でJSON形式で出力してください（必ずJSON形式で、余計なテキストは含めないでください）:
+必ずJSONのみで返してください。Markdownやコードブロックは不要です。
 {
-  "positiveReasons": "高評価の主な理由（箇条書きで3-5点）",
-  "negativeReasons": "低評価の主な理由（箇条書きで3-5点）",
-  "frequentComplaints": "頻出する不満点（箇条書きで3-5点）",
-  "planningInsights": "ゲーム企画に活かせる示唆（箇条書きで3-5点）",
-  "globalExpansionNotes": "海外展開時の注意点（箇条書きで3-5点）"
+  "positiveReasons": "高評価の主な理由。箇条書きで3-5点。",
+  "negativeReasons": "低評価の主な理由。箇条書きで3-5点。",
+  "frequentComplaints": "頻出する不満点。箇条書きで3-5点。",
+  "planningInsights": "ゲーム企画・改善に活かせる示唆。箇条書きで3-5点。",
+  "globalExpansionNotes": "海外展開・ローカライズ面の注意点。箇条書きで3-5点。"
 }`;
+}
 
-  const result = await model.generateContent(prompt);
+function safeParseSummary(content: string): AISummaryResult {
+  try {
+    return JSON.parse(content) as AISummaryResult;
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("Gemini API のJSONレスポンスを解析できませんでした");
+    return JSON.parse(match[0]) as AISummaryResult;
+  }
+}
+
+export async function summarizeReviews(gameName: string, reviews: SteamReview[]): Promise<AISummaryResult> {
+  const positiveReviews = reviews.filter((review) => review.voted_up).slice(0, 80);
+  const negativeReviews = reviews.filter((review) => !review.voted_up).slice(0, 80);
+  const corpus = [
+    "## Positive reviews",
+    positiveReviews.map(formatReview).join("\n---\n"),
+    "## Negative reviews",
+    negativeReviews.map(formatReview).join("\n---\n"),
+  ].join("\n\n");
+
+  return summarizeReviewCorpus(gameName, corpus, `Steam helpfulness order sample (${reviews.length} reviews)`);
+}
+
+export async function summarizeReviewCorpus(
+  gameName: string,
+  reviewCorpus: string,
+  corpusLabel: string,
+): Promise<AISummaryResult> {
+  const model = getModel();
+  const result = await model.generateContent(buildPrompt(gameName, reviewCorpus, corpusLabel));
   const content = result.response.text();
 
   if (!content) {
-    throw new Error("Gemini APIからの応答が空です");
+    throw new Error("Gemini API から空のレスポンスが返りました");
   }
 
-  return JSON.parse(content) as AISummaryResult;
+  return safeParseSummary(content);
 }

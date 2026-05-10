@@ -1,24 +1,57 @@
-import { SteamReview, LanguageStat } from "@/types";
+import { LanguageStat, PublicReview, SteamReview } from "@/types";
 
 const STEAM_STORE_API = "https://store.steampowered.com/api";
 const STEAM_REVIEW_API = "https://store.steampowered.com/appreviews";
 
+export const STEAM_LANGUAGES = [
+  { code: "english", name: "English" },
+  { code: "schinese", name: "Simplified Chinese" },
+  { code: "russian", name: "Russian" },
+  { code: "brazilian", name: "Portuguese - Brazil" },
+  { code: "spanish", name: "Spanish - Spain" },
+  { code: "latam", name: "Spanish - Latin America" },
+  { code: "german", name: "German" },
+  { code: "french", name: "French" },
+  { code: "koreana", name: "Korean" },
+  { code: "japanese", name: "Japanese" },
+  { code: "polish", name: "Polish" },
+  { code: "tchinese", name: "Traditional Chinese" },
+  { code: "turkish", name: "Turkish" },
+  { code: "thai", name: "Thai" },
+  { code: "italian", name: "Italian" },
+  { code: "ukrainian", name: "Ukrainian" },
+  { code: "czech", name: "Czech" },
+  { code: "portuguese", name: "Portuguese - Portugal" },
+  { code: "hungarian", name: "Hungarian" },
+  { code: "dutch", name: "Dutch" },
+  { code: "vietnamese", name: "Vietnamese" },
+  { code: "arabic", name: "Arabic" },
+  { code: "finnish", name: "Finnish" },
+  { code: "swedish", name: "Swedish" },
+  { code: "danish", name: "Danish" },
+  { code: "norwegian", name: "Norwegian" },
+  { code: "romanian", name: "Romanian" },
+  { code: "bulgarian", name: "Bulgarian" },
+  { code: "greek", name: "Greek" },
+];
+
+const LANGUAGE_NAME_BY_CODE = new Map(STEAM_LANGUAGES.map((lang) => [lang.code, lang.name]));
+
+export function getLanguageDisplayName(language: string): string {
+  if (language === "other") return "Other";
+  return LANGUAGE_NAME_BY_CODE.get(language) ?? language;
+}
+
 export function extractAppId(input: string): string | null {
   const trimmed = input.trim();
 
-  // 数字のみの場合はそのままAppID
   if (/^\d+$/.test(trimmed)) {
     return trimmed;
   }
 
-  // Steam URLからAppIDを抽出
   const urlPattern = /store\.steampowered\.com\/app\/(\d+)/;
   const match = trimmed.match(urlPattern);
-  if (match) {
-    return match[1];
-  }
-
-  return null;
+  return match ? match[1] : null;
 }
 
 interface PackageSub {
@@ -78,31 +111,37 @@ export function extractEditionPrices(details: SteamAppDetails): EditionPrice[] {
 
   if (!subs?.length) {
     if (!details.price_overview) return [];
-    return [{
-      name: details.name,
-      displayName: "通常版",
-      packageId: 0,
-      isStandard: true,
-      basePrice: details.price_overview.initial / 100,
-      currentPrice: details.price_overview.final / 100,
-      discountPercent: details.price_overview.discount_percent,
-    }];
+    return [
+      {
+        name: details.name,
+        displayName: "通常版",
+        packageId: 0,
+        isStandard: true,
+        basePrice: details.price_overview.initial / 100,
+        currentPrice: details.price_overview.final / 100,
+        discountPercent: details.price_overview.discount_percent,
+      },
+    ];
   }
 
   const gameName = details.name.toLowerCase();
-  const editionKeywords = /\b(edition|bundle|pack|deluxe|premium|ultimate|legendary|gold|platinum|complete|collection|goty)\b/i;
+  const editionKeywords =
+    /\b(edition|bundle|pack|deluxe|premium|ultimate|legendary|gold|platinum|complete|collection|goty)\b/i;
 
-  const editions = subs.map(sub => {
+  const editions = subs.map((sub) => {
     const cleaned = cleanPackageName(sub.option_text);
     const isNameMatch = cleaned.toLowerCase() === gameName;
     const discount = parseDiscountText(sub.percent_savings_text);
     const currentPrice = sub.price_in_cents_with_discount / 100;
-    const basePrice = discount > 0 ? Math.round(currentPrice / (1 - discount / 100) * 100) / 100 : currentPrice;
+    const basePrice =
+      discount > 0 ? Math.round((currentPrice / (1 - discount / 100)) * 100) / 100 : currentPrice;
 
-    const prefix = details.name + " - ";
+    const prefix = `${details.name} - `;
     const displayName = isNameMatch
       ? "通常版"
-      : cleaned.startsWith(prefix) ? cleaned.slice(prefix.length) : cleaned;
+      : cleaned.startsWith(prefix)
+        ? cleaned.slice(prefix.length)
+        : cleaned;
 
     return {
       name: cleaned,
@@ -115,8 +154,8 @@ export function extractEditionPrices(details: SteamAppDetails): EditionPrice[] {
     };
   });
 
-  if (!editions.some(e => e.isStandard)) {
-    const candidate = editions.find(e => !editionKeywords.test(e.name));
+  if (!editions.some((edition) => edition.isStandard)) {
+    const candidate = editions.find((edition) => !editionKeywords.test(edition.name));
     if (candidate) {
       candidate.isStandard = true;
       candidate.displayName = "通常版";
@@ -126,7 +165,6 @@ export function extractEditionPrices(details: SteamAppDetails): EditionPrice[] {
   }
 
   editions.sort((a, b) => a.basePrice - b.basePrice);
-
   return editions;
 }
 
@@ -136,43 +174,145 @@ export async function fetchAppDetails(appId: string, cc: string = "jp"): Promise
   });
 
   if (!res.ok) {
-    throw new Error(`Steam Store APIエラー: ${res.status}`);
+    throw new Error(`Steam Store API error: ${res.status}`);
   }
 
   const data = await res.json();
   const appData = data[appId];
 
-  if (!appData || !appData.success) {
+  if (!appData?.success) {
     throw new Error(`AppID ${appId} のデータが見つかりません`);
   }
 
   return appData.data;
 }
 
-export async function fetchReviews(
+export interface ReviewSummary {
+  totalReviews: number;
+  totalPositive: number;
+  totalNegative: number;
+}
+
+export async function fetchReviewSummary(
   appId: string,
-  cursor: string = "*",
-  filter: string = "all",
-  numPerPage: number = 100
-): Promise<{ reviews: SteamReview[]; cursor: string; total_reviews: number; total_positive: number; total_negative: number }> {
+  language: string = "all",
+  purchaseType: "all" | "steam" = "all",
+): Promise<ReviewSummary> {
   const params = new URLSearchParams({
     json: "1",
-    filter,
-    language: "all",
-    purchase_type: "all",
-    num_per_page: String(numPerPage),
-    cursor,
+    filter: "all",
+    language,
+    purchase_type: purchaseType,
+    num_per_page: "0",
     review_type: "all",
   });
 
   const res = await fetch(`${STEAM_REVIEW_API}/${appId}?${params}`);
-
   if (!res.ok) {
-    throw new Error(`Steam Review APIエラー: ${res.status}`);
+    throw new Error(`Steam Review API error: ${res.status}`);
   }
 
   const data = await res.json();
+  if (!data.success) {
+    throw new Error(`AppID ${appId} のレビュー概要取得に失敗しました`);
+  }
 
+  return {
+    totalReviews: data.query_summary?.total_reviews || 0,
+    totalPositive: data.query_summary?.total_positive || 0,
+    totalNegative: data.query_summary?.total_negative || 0,
+  };
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+
+  async function worker() {
+    while (index < items.length) {
+      const currentIndex = index++;
+      results[currentIndex] = await mapper(items[currentIndex]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+export async function fetchLanguageStats(appId: string, allSummary?: ReviewSummary): Promise<LanguageStat[]> {
+  const summary = allSummary ?? (await fetchReviewSummary(appId));
+  const knownStats = await mapWithConcurrency(STEAM_LANGUAGES, 5, async (language) => {
+    const langSummary = await fetchReviewSummary(appId, language.code);
+    return {
+      language: language.code,
+      displayName: language.name,
+      count: langSummary.totalReviews,
+      positive: langSummary.totalPositive,
+      negative: langSummary.totalNegative,
+    };
+  });
+
+  const visibleStats = knownStats.filter((stat) => stat.count > 0);
+  const knownCount = visibleStats.reduce((sum, stat) => sum + stat.count, 0);
+  const knownPositive = visibleStats.reduce((sum, stat) => sum + stat.positive, 0);
+  const knownNegative = visibleStats.reduce((sum, stat) => sum + stat.negative, 0);
+  const otherCount = Math.max(summary.totalReviews - knownCount, 0);
+
+  if (otherCount > 0) {
+    visibleStats.push({
+      language: "other",
+      displayName: "Other",
+      count: otherCount,
+      positive: Math.max(summary.totalPositive - knownPositive, 0),
+      negative: Math.max(summary.totalNegative - knownNegative, 0),
+    });
+  }
+
+  return visibleStats.sort((a, b) => b.count - a.count);
+}
+
+export async function fetchReviews(
+  appId: string,
+  options: {
+    cursor?: string;
+    filter?: "all" | "recent" | "updated";
+    language?: string;
+    purchaseType?: "all" | "steam";
+    reviewType?: "all" | "positive" | "negative";
+    numPerPage?: number;
+    dayRange?: number;
+  } = {},
+): Promise<{
+  reviews: SteamReview[];
+  cursor: string;
+  total_reviews: number;
+  total_positive: number;
+  total_negative: number;
+}> {
+  const params = new URLSearchParams({
+    json: "1",
+    filter: options.filter ?? "recent",
+    language: options.language ?? "all",
+    purchase_type: options.purchaseType ?? "all",
+    num_per_page: String(options.numPerPage ?? 100),
+    cursor: options.cursor ?? "*",
+    review_type: options.reviewType ?? "all",
+  });
+
+  if (options.dayRange) {
+    params.set("day_range", String(options.dayRange));
+  }
+
+  const res = await fetch(`${STEAM_REVIEW_API}/${appId}?${params}`);
+  if (!res.ok) {
+    throw new Error(`Steam Review API error: ${res.status}`);
+  }
+
+  const data = await res.json();
   if (!data.success) {
     throw new Error(`AppID ${appId} のレビュー取得に失敗しました`);
   }
@@ -186,7 +326,6 @@ export async function fetchReviews(
   };
 }
 
-// maxReviews: 0 = 全件取得
 export async function fetchAllReviews(
   appId: string,
   onProgress?: (fetched: number, total: number) => void,
@@ -202,12 +341,12 @@ export async function fetchAllReviews(
   let totalReviews = 0;
   let totalPositive = 0;
   let totalNegative = 0;
-  let page = 0;
+  const seenCursors = new Set<string>();
 
   while (true) {
-    const result = await fetchReviews(appId, cursor);
+    const result = await fetchReviews(appId, { cursor, filter: "recent", numPerPage: 100 });
 
-    if (page === 0) {
+    if (allReviews.length === 0) {
       totalReviews = result.total_reviews;
       totalPositive = result.total_positive;
       totalNegative = result.total_negative;
@@ -217,42 +356,67 @@ export async function fetchAllReviews(
 
     allReviews = allReviews.concat(result.reviews);
     cursor = result.cursor;
-    page++;
-
     onProgress?.(Math.min(allReviews.length, totalReviews), totalReviews);
 
-    // 上限または総数に達したら終了
-    if (maxReviews > 0 && allReviews.length >= maxReviews) break;
+    if (maxReviews > 0 && allReviews.length >= maxReviews) {
+      allReviews = allReviews.slice(0, maxReviews);
+      break;
+    }
     if (totalReviews > 0 && allReviews.length >= totalReviews) break;
+    if (!cursor || cursor === "*" || seenCursors.has(cursor)) break;
 
-    if (!cursor || cursor === "*") break;
-
-    // レート制限対策（0.3秒間隔）
+    seenCursors.add(cursor);
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
 
   return { reviews: allReviews, totalReviews, totalPositive, totalNegative };
 }
 
-// Steam購入レビュー数を取得
-export async function fetchSteamPurchaseReviewCount(appId: string): Promise<number> {
-  const params = new URLSearchParams({
-    json: "1",
-    filter: "all",
-    language: "all",
-    purchase_type: "steam",
-    num_per_page: "0",
-  });
+export async function fetchRepresentativeReviews(appId: string, limit: number = 200): Promise<SteamReview[]> {
+  const [positive, negative] = await Promise.all([
+    fetchReviews(appId, {
+      filter: "all",
+      reviewType: "positive",
+      dayRange: 365,
+      numPerPage: 100,
+    }),
+    fetchReviews(appId, {
+      filter: "all",
+      reviewType: "negative",
+      dayRange: 365,
+      numPerPage: 100,
+    }),
+  ]);
 
-  const res = await fetch(`${STEAM_REVIEW_API}/${appId}?${params}`);
+  const byId = new Map<string, SteamReview>();
+  for (const review of [...positive.reviews.slice(0, 140), ...negative.reviews.slice(0, 60)]) {
+    byId.set(review.recommendationid, review);
+  }
 
-  if (!res.ok) return 0;
-
-  const data = await res.json();
-  return data.query_summary?.total_reviews || 0;
+  return Array.from(byId.values()).slice(0, limit);
 }
 
-export function aggregateByLanguage(reviews: SteamReview[]): LanguageStat[] {
+export async function fetchSteamPurchaseReviewCount(appId: string): Promise<number> {
+  const summary = await fetchReviewSummary(appId, "all", "steam");
+  return summary.totalReviews;
+}
+
+export function toPublicReview(review: SteamReview): PublicReview {
+  return {
+    recommendationid: review.recommendationid,
+    language: review.language,
+    review: review.review,
+    voted_up: review.voted_up,
+    timestamp_created: review.timestamp_created,
+    timestamp_updated: review.timestamp_updated,
+    votes_up: Number(review.votes_up ?? 0),
+    weighted_vote_score: Number(review.weighted_vote_score ?? 0),
+    playtime_forever: review.author?.playtime_forever ?? 0,
+    playtime_at_review: review.author?.playtime_at_review ?? 0,
+  };
+}
+
+export function aggregateByLanguage(reviews: SteamReview[] | PublicReview[]): LanguageStat[] {
   const langMap = new Map<string, { count: number; positive: number; negative: number }>();
 
   for (const review of reviews) {
@@ -268,15 +432,15 @@ export function aggregateByLanguage(reviews: SteamReview[]): LanguageStat[] {
   }
 
   return Array.from(langMap.entries())
-    .map(([language, stats]) => ({ language, ...stats }))
+    .map(([language, stats]) => ({
+      language,
+      displayName: getLanguageDisplayName(language),
+      ...stats,
+    }))
     .sort((a, b) => b.count - a.count);
 }
 
 export function parseReleaseYear(dateStr: string): number {
-  // "Mar 15, 2023" or "2023年3月15日" etc.
   const yearMatch = dateStr.match(/(\d{4})/);
-  if (yearMatch) {
-    return parseInt(yearMatch[1], 10);
-  }
-  return new Date().getFullYear();
+  return yearMatch ? parseInt(yearMatch[1], 10) : new Date().getFullYear();
 }
