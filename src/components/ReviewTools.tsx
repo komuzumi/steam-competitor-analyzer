@@ -67,6 +67,14 @@ function compactReview(review: PublicReview): string {
   return `[${review.language}] (${review.voted_up ? "positive" : "negative"}, playtime: ${playtime}h, helpful: ${review.votes_up}) ${review.review.slice(0, 350)}`;
 }
 
+function formatAiReportText(content: string): string {
+  return content
+    .replace(/\r\n/g, "\n")
+    .replace(/([。！？!?])\s*(?!\n|$)/g, "$1\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function buildFullReviewCorpus(reviews: PublicReview[]): string {
   const languageMap = new Map<string, { count: number; positive: number; negative: number }>();
   for (const review of reviews) {
@@ -114,7 +122,7 @@ function SummarySection({ title, content }: { title: string; content: string }) 
   return (
     <div className="rounded-lg bg-gray-50 p-3">
       <p className="mb-1 text-sm font-medium text-gray-700">{title}</p>
-      <p className="whitespace-pre-wrap text-sm text-gray-600">{content}</p>
+      <p className="whitespace-pre-wrap text-sm leading-6 text-gray-600">{formatAiReportText(content)}</p>
     </div>
   );
 }
