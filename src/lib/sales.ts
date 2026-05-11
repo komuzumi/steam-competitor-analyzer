@@ -207,6 +207,18 @@ export function salesEstimateFromMarket(marketEstimate: SteamMarketEstimate): Sa
   };
 }
 
+export function estimateRecentSteamCopiesFromReviews(
+  steamPurchaseReviewCount: number,
+  marketEstimate: SteamMarketEstimate,
+): SalesEstimate {
+  const multiplier = marketEstimate.explanation.adjustedReviewMultiplier;
+  return {
+    conservative: Math.round(steamPurchaseReviewCount * multiplier * 0.75),
+    standard: Math.round(steamPurchaseReviewCount * multiplier),
+    aggressive: Math.round(steamPurchaseReviewCount * multiplier * 1.25),
+  };
+}
+
 export function revenueEstimateFromMarket(marketEstimate: SteamMarketEstimate): RevenueEstimate {
   return {
     conservative: marketEstimate.conservative.grossRevenueEstimate,

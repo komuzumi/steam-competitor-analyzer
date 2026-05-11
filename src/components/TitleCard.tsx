@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { GameAnalysis } from "@/types";
+import { GameAnalysis, LanguageStat, SalesEstimate } from "@/types";
 import { CurrencyCode, formatPrice } from "@/lib/currency";
 import { estimateNetRevenue, estimateRevenue } from "@/lib/sales";
 import LanguageChart from "@/components/LanguageChart";
@@ -14,6 +14,52 @@ function formatNumber(n: number): string {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`;
+}
+
+function formatShortNumber(n: number): string {
+  const rounded = Math.round(n);
+  const abs = Math.abs(rounded);
+  if (abs >= 1_000_000_000) return `${(rounded / 1_000_000_000).toFixed(1)}b`;
+  if (abs >= 1_000_000) return `${(rounded / 1_000_000).toFixed(1)}m`;
+  if (abs >= 1_000) return `${(rounded / 1_000).toFixed(1)}k`;
+  return rounded.toLocaleString("ja-JP");
+}
+
+function formatEstimateRange(values: SalesEstimate): string {
+  return formatEstimateRangeFromCases(values.standard, values.conservative, values.aggressive);
+}
+
+function formatEstimateRangeFromCases(standard: number, conservative: number, aggressive: number): string {
+  return `${formatShortNumber(standard)} (${formatShortNumber(conservative)} - ${formatShortNumber(aggressive)})`;
+}
+
+function formatCurrencyRange(values: SalesEstimate, formatCurrency: (value: number) => string): string {
+  return `${formatCurrency(values.standard)} (${formatCurrency(values.conservative)} - ${formatCurrency(values.aggressive)})`;
+}
+
+function getCountryProxyStats(stats: LanguageStat[]): { label: string; percent: number }[] {
+  const total = stats.reduce((sum, stat) => sum + stat.count, 0);
+  if (total <= 0) {
+    return [
+      { label: "US", percent: 0 },
+      { label: "CN", percent: 0 },
+      { label: "RU", percent: 0 },
+      { label: "others", percent: 0 },
+    ];
+  }
+
+  const countByLanguage = new Map(stats.map((stat) => [stat.language, stat.count]));
+  const usProxy = countByLanguage.get("english") ?? 0;
+  const cnProxy = (countByLanguage.get("schinese") ?? 0) + (countByLanguage.get("tchinese") ?? 0);
+  const ruProxy = countByLanguage.get("russian") ?? 0;
+  const others = Math.max(total - usProxy - cnProxy - ruProxy, 0);
+
+  return [
+    { label: "US", percent: (usProxy / total) * 100 },
+    { label: "CN", percent: (cnProxy / total) * 100 },
+    { label: "RU", percent: (ruProxy / total) * 100 },
+    { label: "others", percent: (others / total) * 100 },
+  ];
 }
 
 interface Props {
@@ -30,6 +76,8 @@ export default function TitleCard({ data, currency }: Props) {
   const grossRevenue = estimateRevenue(data.salesEstimate, priceInfo?.basePrice ?? 0);
   const netRevenue = estimateNetRevenue(grossRevenue);
   const standard = data.marketEstimate.standard;
+  const averagePlaytimeHours = data.marketEstimate.explanation.averagePlaytimeHours;
+  const countryProxyStats = getCountryProxyStats(data.languageStats);
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -83,63 +131,168 @@ export default function TitleCard({ data, currency }: Props) {
 
         <div className="p-5">
           {tab === "overview" && (
-            <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-              <Panel title="価格・エディション">
-                {data.editions.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-200">
-                          <th className="px-2 py-2 text-left text-slate-600">エディション</th>
-                          <th className="px-2 py-2 text-right text-slate-600">定価</th>
-                          <th className="px-2 py-2 text-right text-slate-600">現在価格</th>
-                          <th className="px-2 py-2 text-right text-slate-600">過去最安</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.editions.map((edition) => {
-                          const ep = edition.prices[currency];
-                          if (!ep) return null;
-                          return (
-                            <tr
-                              key={edition.packageId}
-                              className={`border-b border-slate-100 ${edition.isStandard ? "bg-blue-50" : ""}`}
-                            >
-                              <td className="px-2 py-2 font-medium text-slate-700">{edition.displayName}</td>
-                              <td className="px-2 py-2 text-right text-slate-800">{fp(ep.basePrice)}</td>
-                              <td className="px-2 py-2 text-right text-slate-800">
-                                {fp(ep.currentPrice)}
-                                {ep.discountPercent > 0 && <span className="ml-1 text-xs text-green-600">-{ep.discountPercent}%</span>}
-                              </td>
-                              <td className="px-2 py-2 text-right text-slate-800">
-                                {ep.historicalLow !== null ? fp(ep.historicalLow) : "-"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+            <div className="space-y-5">
+              <Panel title="Stats">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <StatItem
+                    label="Copies sold"
+                    value={formatEstimateRange(data.salesEstimate)}
+                    note="Steam直接販売本数の推定"
+                  />
+                  <StatItem
+                    label="Gross revenue (base game)"
+                    value={formatCurrencyRange(grossRevenue, fp)}
+                    note="ベースゲーム売上、Steam手数料控除前"
+                  />
+                  <StatItem
+                    label="Gross revenue total (experimental)"
+                    value="未対応"
+                    note="DLC/IAP/バンドル売上の安定取得元が必要"
+                    muted
+                  />
+                  <StatItem
+                    label="Outstanding wishlists"
+                    value="未取得"
+                    note="Steam公開APIでは取得不可"
+                    muted
+                  />
+                  <StatItem
+                    label="Players total"
+                    value={formatEstimateRangeFromCases(
+                      data.marketEstimate.standard.ownersEstimate,
+                      data.marketEstimate.conservative.ownersEstimate,
+                      data.marketEstimate.aggressive.ownersEstimate,
+                    )}
+                    note="所有者推定をプレイヤー総数の近似として表示"
+                  />
+                  <StatItem
+                    label="Owners"
+                    value={formatEstimateRangeFromCases(
+                      data.marketEstimate.standard.ownersEstimate,
+                      data.marketEstimate.conservative.ownersEstimate,
+                      data.marketEstimate.aggressive.ownersEstimate,
+                    )}
+                    note="レビュー倍率法による推定所有者"
+                  />
+                  <StatItem label="Reviews" value={formatShortNumber(data.totalReviews)} note="Steam公開レビュー数" />
+                  <StatItem label="Review score" value={formatPercent(data.positiveRate)} note="好評レビュー比率" />
+                  <StatItem
+                    label="Average playtime"
+                    value={averagePlaytimeHours == null ? "取得不可" : `${averagePlaytimeHours.toFixed(1)}h`}
+                    note="レビュー投稿者サンプルから算出"
+                  />
+                  <StatItem
+                    label="Average daily concurrent players"
+                    value={
+                      data.currentPlayers == null
+                        ? "履歴不足"
+                        : `履歴不足（現在 ${formatShortNumber(data.currentPlayers)}）`
+                    }
+                    note="30日以上の同接スナップショット蓄積後に有効化"
+                    muted
+                  />
+                  <StatItem label="Followers" value="未取得" note="SteamDB等の外部独自データは使わない" muted />
+                  <StatItem
+                    label="Copies sold in the last 7 days"
+                    value={
+                      data.recentSalesEstimate
+                        ? `${data.recentSalesEstimate.isReviewCountCapped ? ">= " : ""}${formatEstimateRange(
+                            data.recentSalesEstimate.copiesSoldEstimate,
+                          )}`
+                        : "未取得"
+                    }
+                    note={
+                      data.recentSalesEstimate
+                        ? `直近${data.recentSalesEstimate.days}日のSteam購入レビュー${formatNumber(
+                            data.recentSalesEstimate.steamPurchaseReviewCount,
+                          )}${data.recentSalesEstimate.isReviewCountCapped ? "件以上" : "件"}から推定`
+                        : "直近レビュー取得に失敗"
+                    }
+                  />
+                </div>
+
+                <div className="mt-5 rounded-lg bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-800">Players by country</p>
+                    <p className="text-xs text-slate-500">レビュー言語ベースの簡易プロキシ</p>
                   </div>
-                ) : (
-                  <p className="text-sm text-slate-500">価格情報を取得できませんでした。</p>
-                )}
+                  <div className="mt-3 grid gap-3 md:grid-cols-4">
+                    {countryProxyStats.map((country) => (
+                      <div key={country.label}>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-medium text-slate-700">{country.label}</span>
+                          <span className="text-slate-600">~ {formatPercent(country.percent)}</span>
+                        </div>
+                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div className="h-full rounded-full bg-blue-500" style={{ width: `${country.percent}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-xs leading-5 text-slate-500">
+                    国別の実測ではありません。USは英語レビュー、CNは中国語レビュー、RUはロシア語レビューを近似として使っています。
+                  </p>
+                </div>
               </Panel>
 
-              <Panel title="レビュー概要">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Metric label="総レビュー" value={formatNumber(data.totalReviews)} />
-                  <Metric label="Steam購入レビュー" value={formatNumber(data.steamPurchaseReviews)} />
-                  <Metric label="好評" value={formatNumber(data.positiveReviews)} color="text-green-600" />
-                  <Metric label="不評" value={formatNumber(data.negativeReviews)} color="text-red-600" />
-                </div>
-                <div className="mt-4 flex items-center gap-2">
-                  <span className="text-sm text-slate-600">好評率</span>
-                  <div className="h-4 flex-1 overflow-hidden rounded-full bg-slate-200">
-                    <div className="h-full rounded-full bg-green-500" style={{ width: `${data.positiveRate}%` }} />
+              <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+                <Panel title="価格・エディション">
+                  {data.editions.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-200">
+                            <th className="px-2 py-2 text-left text-slate-600">エディション</th>
+                            <th className="px-2 py-2 text-right text-slate-600">定価</th>
+                            <th className="px-2 py-2 text-right text-slate-600">現在価格</th>
+                            <th className="px-2 py-2 text-right text-slate-600">過去最安</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.editions.map((edition) => {
+                            const ep = edition.prices[currency];
+                            if (!ep) return null;
+                            return (
+                              <tr
+                                key={edition.packageId}
+                                className={`border-b border-slate-100 ${edition.isStandard ? "bg-blue-50" : ""}`}
+                              >
+                                <td className="px-2 py-2 font-medium text-slate-700">{edition.displayName}</td>
+                                <td className="px-2 py-2 text-right text-slate-800">{fp(ep.basePrice)}</td>
+                                <td className="px-2 py-2 text-right text-slate-800">
+                                  {fp(ep.currentPrice)}
+                                  {ep.discountPercent > 0 && <span className="ml-1 text-xs text-green-600">-{ep.discountPercent}%</span>}
+                                </td>
+                                <td className="px-2 py-2 text-right text-slate-800">
+                                  {ep.historicalLow !== null ? fp(ep.historicalLow) : "-"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500">価格情報を取得できませんでした。</p>
+                  )}
+                </Panel>
+
+                <Panel title="レビュー概要">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Metric label="総レビュー" value={formatNumber(data.totalReviews)} />
+                    <Metric label="Steam購入レビュー" value={formatNumber(data.steamPurchaseReviews)} />
+                    <Metric label="好評" value={formatNumber(data.positiveReviews)} color="text-green-600" />
+                    <Metric label="不評" value={formatNumber(data.negativeReviews)} color="text-red-600" />
                   </div>
-                  <span className="text-sm font-medium text-slate-800">{formatPercent(data.positiveRate)}</span>
-                </div>
-              </Panel>
+                  <div className="mt-4 flex items-center gap-2">
+                    <span className="text-sm text-slate-600">好評率</span>
+                    <div className="h-4 flex-1 overflow-hidden rounded-full bg-slate-200">
+                      <div className="h-full rounded-full bg-green-500" style={{ width: `${data.positiveRate}%` }} />
+                    </div>
+                    <span className="text-sm font-medium text-slate-800">{formatPercent(data.positiveRate)}</span>
+                  </div>
+                </Panel>
+              </div>
             </div>
           )}
 
@@ -269,6 +422,16 @@ function Metric({ label, value, color }: { label: string; value: string; color?:
     <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
       <p className="text-xs text-slate-500">{label}</p>
       <p className={`mt-1 text-lg font-bold ${color || "text-slate-900"}`}>{value}</p>
+    </div>
+  );
+}
+
+function StatItem({ label, value, note, muted }: { label: string; value: string; note: string; muted?: boolean }) {
+  return (
+    <div className={`rounded-lg border p-3 ${muted ? "border-slate-100 bg-slate-50" : "border-slate-200 bg-white"}`}>
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className={`mt-1 text-lg font-bold ${muted ? "text-slate-500" : "text-slate-900"}`}>{value}</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{note}</p>
     </div>
   );
 }

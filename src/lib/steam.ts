@@ -455,6 +455,41 @@ export async function fetchSteamPurchaseReviewCount(appId: string): Promise<numb
   return summary.totalReviews;
 }
 
+export async function fetchRecentSteamPurchaseReviewCount(
+  appId: string,
+  days: number = 7,
+  maxReviews: number = 1_500,
+): Promise<{ count: number; isCapped: boolean }> {
+  let cursor = "*";
+  let count = 0;
+  const seenCursors = new Set<string>();
+
+  while (count < maxReviews) {
+    const result = await fetchReviews(appId, {
+      cursor,
+      filter: "recent",
+      language: "all",
+      purchaseType: "steam",
+      reviewType: "all",
+      dayRange: days,
+      numPerPage: Math.min(100, maxReviews - count),
+    });
+
+    if (!result.reviews.length) break;
+
+    count += result.reviews.length;
+    cursor = result.cursor;
+
+    if (count >= maxReviews) return { count, isCapped: true };
+    if (!cursor || cursor === "*" || seenCursors.has(cursor)) break;
+
+    seenCursors.add(cursor);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  return { count, isCapped: false };
+}
+
 export async function fetchCurrentPlayers(appId: string): Promise<number | null> {
   const params = new URLSearchParams({ appid: appId });
   const res = await fetchWithTimeout(`${STEAM_CURRENT_PLAYERS_API}?${params}`, undefined, 8_000);

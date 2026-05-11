@@ -6,6 +6,10 @@ function formatNumber(n: number): string {
   return Math.round(n).toLocaleString("ja-JP");
 }
 
+function formatRange(standard: number, conservative: number, aggressive: number): string {
+  return `${formatNumber(standard)} (${formatNumber(conservative)} - ${formatNumber(aggressive)})`;
+}
+
 export function generateMarkdownReport(results: GameAnalysis[], currency: CurrencyCode): string {
   const fp = (n: number) => formatPrice(n, currency);
   const lines: string[] = [];
@@ -53,6 +57,56 @@ export function generateMarkdownReport(results: GameAnalysis[], currency: Curren
         }`,
       );
     }
+
+    lines.push("");
+    lines.push("### Stats");
+    lines.push(`- **Copies sold:** ${formatRange(result.salesEstimate.standard, result.salesEstimate.conservative, result.salesEstimate.aggressive)}`);
+    lines.push(
+      `- **Gross revenue (base game):** ${fp(gross.standard)} (${fp(gross.conservative)} - ${fp(gross.aggressive)})`,
+    );
+    lines.push("- **Gross revenue total (experimental):** 未対応");
+    lines.push("- **Outstanding wishlists:** 未取得");
+    lines.push(
+      `- **Players total:** ${formatRange(
+        result.marketEstimate.standard.ownersEstimate,
+        result.marketEstimate.conservative.ownersEstimate,
+        result.marketEstimate.aggressive.ownersEstimate,
+      )}`,
+    );
+    lines.push(
+      `- **Owners:** ${formatRange(
+        result.marketEstimate.standard.ownersEstimate,
+        result.marketEstimate.conservative.ownersEstimate,
+        result.marketEstimate.aggressive.ownersEstimate,
+      )}`,
+    );
+    lines.push(`- **Reviews:** ${formatNumber(result.totalReviews)}`);
+    lines.push(`- **Review score:** ${result.positiveRate.toFixed(1)}%`);
+    lines.push(
+      `- **Average playtime:** ${
+        result.marketEstimate.explanation.averagePlaytimeHours == null
+          ? "取得不可"
+          : `${result.marketEstimate.explanation.averagePlaytimeHours.toFixed(1)}h`
+      }`,
+    );
+    lines.push(
+      `- **Average daily concurrent players:** ${
+        result.currentPlayers == null ? "履歴不足" : `履歴不足（現在 ${formatNumber(result.currentPlayers)}）`
+      }`,
+    );
+    lines.push("- **Followers:** 未取得");
+    lines.push(
+      `- **Copies sold in the last 7 days:** ${
+        result.recentSalesEstimate
+          ? `${result.recentSalesEstimate.isReviewCountCapped ? ">= " : ""}${formatRange(
+              result.recentSalesEstimate.copiesSoldEstimate.standard,
+              result.recentSalesEstimate.copiesSoldEstimate.conservative,
+              result.recentSalesEstimate.copiesSoldEstimate.aggressive,
+            )}`
+          : "未取得"
+      }`,
+    );
+    lines.push("- **Players by country:** レビュー言語ベースの簡易プロキシを画面側に表示");
 
     lines.push("");
     lines.push("### 推定販売本数・売上");

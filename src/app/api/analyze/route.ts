@@ -4,12 +4,13 @@ import {
   fetchAppDetails,
   fetchCurrentPlayers,
   fetchLanguageStats,
+  fetchRecentSteamPurchaseReviewCount,
   fetchReviewPlaytimeSample,
   fetchReviewSummary,
   fetchSteamPurchaseReviewCount,
   parseReleaseYear,
 } from "@/lib/steam";
-import { estimateSteamMarket, salesEstimateFromMarket } from "@/lib/sales";
+import { estimateRecentSteamCopiesFromReviews, estimateSteamMarket, salesEstimateFromMarket } from "@/lib/sales";
 import { fetchHistoricalLow } from "@/lib/itad";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { saveMetricSnapshot } from "@/lib/metricsStore";
@@ -95,11 +96,18 @@ export async function POST(req: NextRequest) {
 
             send({ type: "progress", appId, appName: gameName, phase: "レビュー概要と言語別集計を取得中..." });
 
-            const [reviewSummary, steamPurchaseReviews, currentPlayers, averagePlaytimeHours] = await Promise.all([
+            const [
+              reviewSummary,
+              steamPurchaseReviews,
+              currentPlayers,
+              averagePlaytimeHours,
+              recentSteamPurchaseReviews7d,
+            ] = await Promise.all([
               fetchReviewSummary(appId),
               fetchSteamPurchaseReviewCount(appId),
               fetchCurrentPlayers(appId).catch(() => null),
               fetchReviewPlaytimeSample(appId).catch(() => null),
+              fetchRecentSteamPurchaseReviewCount(appId, 7).catch(() => null),
             ]);
             send({ type: "progress", appId, appName: gameName, phase: "言語別レビュー集計を取得中..." });
             const languageStats = await fetchLanguageStats(appId, reviewSummary);
@@ -123,6 +131,18 @@ export async function POST(req: NextRequest) {
               currentPlayers,
             });
             const salesEstimate = salesEstimateFromMarket(marketEstimate);
+            const recentSalesEstimate =
+              recentSteamPurchaseReviews7d == null
+                ? null
+                : {
+                    days: 7,
+                    steamPurchaseReviewCount: recentSteamPurchaseReviews7d.count,
+                    isReviewCountCapped: recentSteamPurchaseReviews7d.isCapped,
+                    copiesSoldEstimate: estimateRecentSteamCopiesFromReviews(
+                      recentSteamPurchaseReviews7d.count,
+                      marketEstimate,
+                    ),
+                  };
 
             const result: GameAnalysis = {
               appId,
@@ -139,6 +159,7 @@ export async function POST(req: NextRequest) {
               salesEstimate,
               marketEstimate,
               currentPlayers,
+              recentSalesEstimate,
               prices,
               editions,
               reviewSamples: [],

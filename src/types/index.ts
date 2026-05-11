@@ -41,6 +41,13 @@ export interface RevenueEstimate {
   aggressive: number;
 }
 
+export interface RecentSalesEstimate {
+  days: number;
+  steamPurchaseReviewCount: number;
+  isReviewCountCapped: boolean;
+  copiesSoldEstimate: SalesEstimate;
+}
+
 export type EstimateCase = "conservative" | "standard" | "aggressive";
 export type EstimateConfidence = "High" | "Medium" | "Low";
 
@@ -126,6 +133,7 @@ export interface GameAnalysis {
   salesEstimate: SalesEstimate;
   marketEstimate: SteamMarketEstimate;
   currentPlayers: number | null;
+  recentSalesEstimate: RecentSalesEstimate | null;
   prices: Record<string, CurrencyPriceInfo>;
   editions: EditionInfo[];
   reviewSamples: { text: string; language: string; votedUp: boolean; playtime: number }[];
