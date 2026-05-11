@@ -1,109 +1,114 @@
 import { GameAnalysis } from "@/types";
 import { formatPrice, CurrencyCode } from "@/lib/currency";
-import { estimateRevenue } from "@/lib/sales";
+import { estimateNetRevenue, estimateRevenue } from "@/lib/sales";
 
 function formatNumber(n: number): string {
-  return n.toLocaleString("ja-JP");
+  return Math.round(n).toLocaleString("ja-JP");
 }
 
 export function generateMarkdownReport(results: GameAnalysis[], currency: CurrencyCode): string {
   const fp = (n: number) => formatPrice(n, currency);
   const lines: string[] = [];
-  lines.push("# Steam 競合調査レポート");
+  lines.push("# Steam 競合・市場分析レポート");
   lines.push(`生成日時: ${new Date().toLocaleString("ja-JP")}`);
   lines.push(`通貨: ${currency}`);
   lines.push("");
 
-  // 比較テーブル（複数タイトルの場合）
   if (results.length > 1) {
     lines.push("## 比較サマリー");
     lines.push("");
-    lines.push(
-      "| タイトル | 総レビュー数 | 好評率 | 仮説販売本数(標準) | 仮説売上(標準) |"
-    );
-    lines.push("|---|---|---|---|---|");
-    for (const r of results) {
-      const rev = estimateRevenue(r.salesEstimate, r.prices[currency]?.basePrice ?? 0);
+    lines.push("| タイトル | レビュー数 | 好評率 | 推定Steam販売本数(標準) | 総売上(標準) | 手数料控除後(標準) |");
+    lines.push("|---|---:|---:|---:|---:|---:|");
+    for (const result of results) {
+      const gross = estimateRevenue(result.salesEstimate, result.prices[currency]?.basePrice ?? 0);
+      const net = estimateNetRevenue(gross);
       lines.push(
-        `| ${r.name} | ${formatNumber(r.totalReviews)} | ${r.positiveRate.toFixed(1)}% | ${formatNumber(r.salesEstimate.standard)} | ${fp(rev.standard)} |`
+        `| ${result.name} | ${formatNumber(result.totalReviews)} | ${result.positiveRate.toFixed(1)}% | ${formatNumber(result.salesEstimate.standard)} | ${fp(gross.standard)} | ${fp(net.standard)} |`,
       );
     }
     lines.push("");
   }
 
-  // 各タイトル詳細
-  for (const r of results) {
-    const p = r.prices[currency];
-    const rev = estimateRevenue(r.salesEstimate, p?.basePrice ?? 0);
+  for (const result of results) {
+    const price = result.prices[currency];
+    const gross = estimateRevenue(result.salesEstimate, price?.basePrice ?? 0);
+    const net = estimateNetRevenue(gross);
 
-    lines.push(`## ${r.name}`);
+    lines.push(`## ${result.name}`);
     lines.push("");
-    lines.push(`- **AppID:** ${r.appId}`);
-    lines.push(`- **発売日:** ${r.releaseDate}`);
+    lines.push(`- **AppID:** ${result.appId}`);
+    lines.push(`- **発売日:** ${result.releaseDate}`);
+    lines.push(`- **現在同時接続者:** ${result.currentPlayers == null ? "取得不可" : formatNumber(result.currentPlayers)}`);
+    lines.push(`- **総レビュー数:** ${formatNumber(result.totalReviews)}`);
+    lines.push(`- **Steam購入レビュー数:** ${formatNumber(result.steamPurchaseReviews)}`);
+    lines.push(`- **好評率:** ${result.positiveRate.toFixed(1)}%`);
+    lines.push(`- **推定信頼度:** ${result.marketEstimate.confidence}`);
 
-    if (r.editions.length > 0) {
-      lines.push("");
-      lines.push("### 価格情報（エディション別）");
-      lines.push("| エディション | 定価 | 現在価格 | 過去最低 |");
-      lines.push("|---|---|---|---|");
-      for (const edition of r.editions) {
-        const ep = edition.prices[currency];
-        if (!ep) continue;
-        const currentCol = ep.discountPercent > 0
-          ? `${fp(ep.currentPrice)} (-${ep.discountPercent}%)`
-          : fp(ep.currentPrice);
-        const lowCol = ep.historicalLow !== null ? fp(ep.historicalLow) : "---";
-        lines.push(`| ${edition.displayName} | ${fp(ep.basePrice)} | ${currentCol} | ${lowCol} |`);
-      }
-    } else if (p) {
-      lines.push(`- **定価:** ${fp(p.basePrice)}`);
-      lines.push(`- **現在価格:** ${fp(p.currentPrice)}${p.discountPercent > 0 ? ` (-${p.discountPercent}%)` : ""}`);
-      lines.push(`- **過去最低価格:** ${p.historicalLow !== null ? `${fp(p.historicalLow)}${p.historicalLowDate ? ` (${p.historicalLowDate})` : ""}` : "不明"}`);
+    if (price) {
+      lines.push(`- **定価:** ${fp(price.basePrice)}`);
+      lines.push(`- **現在価格:** ${fp(price.currentPrice)}${price.discountPercent > 0 ? ` (-${price.discountPercent}%)` : ""}`);
+      lines.push(
+        `- **過去最安価格:** ${
+          price.historicalLow !== null ? `${fp(price.historicalLow)}${price.historicalLowDate ? ` (${price.historicalLowDate})` : ""}` : "不明"
+        }`,
+      );
     }
-    lines.push(`- **総レビュー数:** ${formatNumber(r.totalReviews)}`);
-    lines.push(`- **Steam購入レビュー数:** ${formatNumber(r.steamPurchaseReviews)}`);
-    lines.push(`- **ポジティブ:** ${formatNumber(r.positiveReviews)}`);
-    lines.push(`- **ネガティブ:** ${formatNumber(r.negativeReviews)}`);
-    lines.push(`- **好評率:** ${r.positiveRate.toFixed(1)}%`);
+
+    lines.push("");
+    lines.push("### 推定販売本数・売上");
+    lines.push("| ケース | 推定所有者 | 推定Steam販売本数 | 総売上 | 手数料控除後 |");
+    lines.push("|---|---:|---:|---:|---:|");
+    lines.push(
+      `| 保守 | ${formatNumber(result.marketEstimate.conservative.ownersEstimate)} | ${formatNumber(result.salesEstimate.conservative)} | ${fp(gross.conservative)} | ${fp(net.conservative)} |`,
+    );
+    lines.push(
+      `| 標準 | ${formatNumber(result.marketEstimate.standard.ownersEstimate)} | ${formatNumber(result.salesEstimate.standard)} | ${fp(gross.standard)} | ${fp(net.standard)} |`,
+    );
+    lines.push(
+      `| 強気 | ${formatNumber(result.marketEstimate.aggressive.ownersEstimate)} | ${formatNumber(result.salesEstimate.aggressive)} | ${fp(gross.aggressive)} | ${fp(net.aggressive)} |`,
+    );
     lines.push("");
 
-    lines.push("### 仮説販売本数");
-    lines.push("| ケース | 販売本数 | 売上 |");
-    lines.push("|---|---|---|");
-    lines.push(`| 保守 | ${formatNumber(r.salesEstimate.conservative)} | ${fp(rev.conservative)} |`);
-    lines.push(`| 標準 | ${formatNumber(r.salesEstimate.standard)} | ${fp(rev.standard)} |`);
-    lines.push(`| 強気 | ${formatNumber(r.salesEstimate.aggressive)} | ${fp(rev.aggressive)} |`);
+    lines.push("### 推定ロジック");
+    lines.push(`- 基準レビュー倍率: ${result.marketEstimate.explanation.baseReviewMultiplier} (${result.marketEstimate.explanation.ageFactorLabel})`);
+    lines.push(`- 価格補正: x ${result.marketEstimate.explanation.priceFactor}`);
+    lines.push(`- 好評率補正: x ${result.marketEstimate.explanation.reviewScoreFactor}`);
+    lines.push(`- プレイ時間補正: x ${result.marketEstimate.explanation.playtimeFactor}`);
+    lines.push(`- 最終レビュー倍率: ${result.marketEstimate.explanation.adjustedReviewMultiplier.toFixed(1)}`);
+    lines.push(`- Steam購入レビュー比率: ${(result.marketEstimate.explanation.steamPurchaseReviewShare * 100).toFixed(1)}%`);
+    lines.push(`- 使用データ: ${result.marketEstimate.explanation.usedData.join(" / ")}`);
     lines.push("");
 
-    if (r.languageStats.length > 0) {
-      lines.push("### 言語別レビュー数");
-      lines.push("| 言語 | レビュー数 | ポジティブ | ネガティブ |");
-      lines.push("|---|---|---|---|");
-      for (const lang of r.languageStats.slice(0, 15)) {
+    if (result.languageStats.length > 0) {
+      lines.push("### 言語別レビュー");
+      lines.push("| 言語 | レビュー数 | 好評 | 不評 | 好評率 |");
+      lines.push("|---|---:|---:|---:|---:|");
+      for (const lang of result.languageStats.slice(0, 15)) {
+        const rate = lang.count > 0 ? (lang.positive / lang.count) * 100 : 0;
         lines.push(
-          `| ${lang.displayName ?? lang.language} | ${lang.count} | ${lang.positive} | ${lang.negative} |`
+          `| ${lang.displayName ?? lang.language} | ${formatNumber(lang.count)} | ${formatNumber(lang.positive)} | ${formatNumber(lang.negative)} | ${rate.toFixed(1)}% |`,
         );
       }
       lines.push("");
     }
 
-    if (r.aiSummary) {
+    if (result.aiSummary) {
       lines.push("### AI分析レポート");
       lines.push("");
       lines.push("#### 高評価の理由");
-      lines.push(r.aiSummary.positiveReasons);
+      lines.push(result.aiSummary.positiveReasons);
       lines.push("");
       lines.push("#### 低評価の理由");
-      lines.push(r.aiSummary.negativeReasons);
+      lines.push(result.aiSummary.negativeReasons);
       lines.push("");
       lines.push("#### 頻出する不満");
-      lines.push(r.aiSummary.frequentComplaints);
+      lines.push(result.aiSummary.frequentComplaints);
       lines.push("");
       lines.push("#### 企画に活かせる示唆");
-      lines.push(r.aiSummary.planningInsights);
+      lines.push(result.aiSummary.planningInsights);
       lines.push("");
       lines.push("#### 海外展開時の注意点");
-      lines.push(r.aiSummary.globalExpansionNotes);
+      lines.push(result.aiSummary.globalExpansionNotes);
       lines.push("");
     }
 

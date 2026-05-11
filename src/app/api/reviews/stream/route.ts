@@ -3,8 +3,18 @@ import { fetchReviews, toPublicReview } from "@/lib/steam";
 
 export const maxDuration = 300;
 
+type ReviewType = "all" | "positive" | "negative";
+
+function parseReviewType(value: string | null): ReviewType {
+  if (value === "positive" || value === "negative") return value;
+  return "all";
+}
+
 export async function GET(req: NextRequest) {
   const appId = req.nextUrl.searchParams.get("appId");
+  const language = req.nextUrl.searchParams.get("language") || "all";
+  const reviewType = parseReviewType(req.nextUrl.searchParams.get("reviewType"));
+
   if (!appId || !/^\d+$/.test(appId)) {
     return new Response(JSON.stringify({ error: "AppIDを指定してください" }), {
       status: 400,
@@ -29,12 +39,14 @@ export async function GET(req: NextRequest) {
           const result = await fetchReviews(appId, {
             cursor,
             filter: "recent",
+            language,
+            reviewType,
             numPerPage: 100,
           });
 
           if (fetched === 0) {
             total = result.total_reviews;
-            send({ type: "meta", total });
+            send({ type: "meta", total, language, reviewType });
           }
 
           for (const review of result.reviews) {

@@ -2,6 +2,7 @@ import { LanguageStat, PublicReview, SteamReview } from "@/types";
 
 const STEAM_STORE_API = "https://store.steampowered.com/api";
 const STEAM_REVIEW_API = "https://store.steampowered.com/appreviews";
+const STEAM_CURRENT_PLAYERS_API = "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1";
 const STEAM_FETCH_TIMEOUT_MS = 15_000;
 
 async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = STEAM_FETCH_TIMEOUT_MS): Promise<Response> {
@@ -53,26 +54,23 @@ export const STEAM_LANGUAGES = [
 const LANGUAGE_NAME_BY_CODE = new Map(STEAM_LANGUAGES.map((lang) => [lang.code, lang.name]));
 
 export function getLanguageDisplayName(language: string): string {
+  if (language === "all") return "All languages";
   if (language === "other") return "Other";
   return LANGUAGE_NAME_BY_CODE.get(language) ?? language;
 }
 
 export function extractAppId(input: string): string | null {
   const trimmed = input.trim();
+  if (/^\d+$/.test(trimmed)) return trimmed;
 
-  if (/^\d+$/.test(trimmed)) {
-    return trimmed;
-  }
-
-  const urlPattern = /store\.steampowered\.com\/app\/(\d+)/;
-  const match = trimmed.match(urlPattern);
+  const match = trimmed.match(/store\.steampowered\.com\/app\/(\d+)/);
   return match ? match[1] : null;
 }
 
 interface PackageSub {
   packageid: number;
-  percent_savings: number;
-  percent_savings_text: string;
+  percent_savings?: number;
+  percent_savings_text?: string;
   option_text: string;
   price_in_cents_with_discount: number;
 }
@@ -106,8 +104,8 @@ function cleanPackageName(optionText: string): string {
     .trim();
 }
 
-function parseDiscountText(text: string): number {
-  const match = text.match(/-(\d+)%/);
+function parseDiscountText(text?: string): number {
+  const match = text?.match(/-(\d+)%/);
   return match ? parseInt(match[1], 10) : 0;
 }
 
@@ -125,7 +123,20 @@ export function extractEditionPrices(details: SteamAppDetails): EditionPrice[] {
   const subs = details.package_groups?.[0]?.subs;
 
   if (!subs?.length) {
-    if (!details.price_overview) return [];
+    if (!details.price_overview) {
+      return [
+        {
+          name: details.name,
+          displayName: "通常版",
+          packageId: 0,
+          isStandard: true,
+          basePrice: 0,
+          currentPrice: 0,
+          discountPercent: 0,
+        },
+      ];
+    }
+
     return [
       {
         name: details.name,
@@ -143,44 +154,40 @@ export function extractEditionPrices(details: SteamAppDetails): EditionPrice[] {
   const editionKeywords =
     /\b(edition|bundle|pack|deluxe|premium|ultimate|legendary|gold|platinum|complete|collection|goty)\b/i;
 
-  const editions = subs.map((sub) => {
-    const cleaned = cleanPackageName(sub.option_text);
-    const isNameMatch = cleaned.toLowerCase() === gameName;
-    const discount = parseDiscountText(sub.percent_savings_text);
-    const currentPrice = sub.price_in_cents_with_discount / 100;
-    const basePrice =
-      discount > 0 ? Math.round((currentPrice / (1 - discount / 100)) * 100) / 100 : currentPrice;
+  const editions = subs
+    .filter((sub) => sub.price_in_cents_with_discount >= 0)
+    .map((sub) => {
+      const cleaned = cleanPackageName(sub.option_text);
+      const isNameMatch = cleaned.toLowerCase() === gameName;
+      const discount = parseDiscountText(sub.percent_savings_text);
+      const currentPrice = sub.price_in_cents_with_discount / 100;
+      const basePrice =
+        discount > 0 ? Math.round((currentPrice / (1 - discount / 100)) * 100) / 100 : currentPrice;
+      const prefix = `${details.name} - `;
+      const displayName = isNameMatch ? "通常版" : cleaned.startsWith(prefix) ? cleaned.slice(prefix.length) : cleaned;
 
-    const prefix = `${details.name} - `;
-    const displayName = isNameMatch
-      ? "通常版"
-      : cleaned.startsWith(prefix)
-        ? cleaned.slice(prefix.length)
-        : cleaned;
-
-    return {
-      name: cleaned,
-      displayName,
-      packageId: sub.packageid,
-      isStandard: isNameMatch,
-      basePrice,
-      currentPrice,
-      discountPercent: discount,
-    };
-  });
+      return {
+        name: cleaned,
+        displayName,
+        packageId: sub.packageid,
+        isStandard: isNameMatch,
+        basePrice,
+        currentPrice,
+        discountPercent: discount,
+      };
+    });
 
   if (!editions.some((edition) => edition.isStandard)) {
     const candidate = editions.find((edition) => !editionKeywords.test(edition.name));
     if (candidate) {
       candidate.isStandard = true;
       candidate.displayName = "通常版";
-    } else {
+    } else if (editions[0]) {
       editions[0].isStandard = true;
     }
   }
 
-  editions.sort((a, b) => a.basePrice - b.basePrice);
-  return editions;
+  return editions.sort((a, b) => a.basePrice - b.basePrice);
 }
 
 export async function fetchAppDetails(appId: string, cc: string = "jp"): Promise<SteamAppDetails> {
@@ -188,15 +195,12 @@ export async function fetchAppDetails(appId: string, cc: string = "jp"): Promise
     next: { revalidate: 3600 },
   });
 
-  if (!res.ok) {
-    throw new Error(`Steam Store API error: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`Steam Store API error: ${res.status}`);
 
   const data = await res.json();
   const appData = data[appId];
-
   if (!appData?.success) {
-    throw new Error(`AppID ${appId} のデータが見つかりません`);
+    throw new Error(`AppID ${appId} のストア情報が見つかりませんでした`);
   }
 
   return appData.data;
@@ -223,9 +227,7 @@ export async function fetchReviewSummary(
   });
 
   const res = await fetchWithTimeout(`${STEAM_REVIEW_API}/${appId}?${params}`);
-  if (!res.ok) {
-    throw new Error(`Steam Review API error: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`Steam Review API error: ${res.status}`);
 
   const data = await res.json();
   if (!data.success) {
@@ -317,19 +319,15 @@ export async function fetchReviews(
     filter: options.filter ?? "recent",
     language: options.language ?? "all",
     purchase_type: options.purchaseType ?? "all",
-    num_per_page: String(options.numPerPage ?? 100),
+    num_per_page: String(Math.min(options.numPerPage ?? 100, 100)),
     cursor: options.cursor ?? "*",
     review_type: options.reviewType ?? "all",
   });
 
-  if (options.dayRange) {
-    params.set("day_range", String(options.dayRange));
-  }
+  if (options.dayRange) params.set("day_range", String(options.dayRange));
 
   const res = await fetchWithTimeout(`${STEAM_REVIEW_API}/${appId}?${params}`);
-  if (!res.ok) {
-    throw new Error(`Steam Review API error: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`Steam Review API error: ${res.status}`);
 
   const data = await res.json();
   if (!data.success) {
@@ -349,6 +347,7 @@ export async function fetchAllReviews(
   appId: string,
   onProgress?: (fetched: number, total: number) => void,
   maxReviews: number = 0,
+  language: string = "all",
 ): Promise<{
   reviews: SteamReview[];
   totalReviews: number;
@@ -363,7 +362,7 @@ export async function fetchAllReviews(
   const seenCursors = new Set<string>();
 
   while (true) {
-    const result = await fetchReviews(appId, { cursor, filter: "recent", numPerPage: 100 });
+    const result = await fetchReviews(appId, { cursor, filter: "recent", numPerPage: 100, language });
 
     if (allReviews.length === 0) {
       totalReviews = result.total_reviews;
@@ -391,33 +390,96 @@ export async function fetchAllReviews(
   return { reviews: allReviews, totalReviews, totalPositive, totalNegative };
 }
 
-export async function fetchRepresentativeReviews(appId: string, limit: number = 200): Promise<SteamReview[]> {
+function reviewRank(review: SteamReview): number {
+  return Number(review.weighted_vote_score ?? 0) * 100_000 + Number(review.votes_up ?? 0) + review.timestamp_created / 1_000_000;
+}
+
+async function fetchReviewTypeSample(
+  appId: string,
+  reviewType: "positive" | "negative",
+  target: number,
+  language: string,
+): Promise<SteamReview[]> {
+  const reviews: SteamReview[] = [];
+  let cursor = "*";
+  const seenCursors = new Set<string>();
+
+  while (reviews.length < target) {
+    const result = await fetchReviews(appId, {
+      cursor,
+      filter: "all",
+      reviewType,
+      language,
+      dayRange: 365,
+      numPerPage: Math.min(100, target - reviews.length),
+    });
+    reviews.push(...result.reviews);
+    cursor = result.cursor;
+
+    if (!result.reviews.length) break;
+    if (!cursor || cursor === "*" || seenCursors.has(cursor)) break;
+    seenCursors.add(cursor);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  return reviews.sort((a, b) => reviewRank(b) - reviewRank(a)).slice(0, target);
+}
+
+export async function fetchRepresentativeReviews(
+  appId: string,
+  limit: number = 200,
+  language: string = "all",
+): Promise<SteamReview[]> {
+  const summary = await fetchReviewSummary(appId, language).catch(() => ({
+    totalReviews: 0,
+    totalPositive: 0,
+    totalNegative: 0,
+  }));
+  const negativeShare = summary.totalReviews > 0 ? summary.totalNegative / summary.totalReviews : 0.3;
+  const negativeTarget =
+    summary.totalNegative > 0 ? Math.round(limit * Math.min(Math.max(negativeShare, 0.25), 0.5)) : 0;
+  const positiveTarget = Math.max(limit - negativeTarget, 0);
+
   const [positive, negative] = await Promise.all([
-    fetchReviews(appId, {
-      filter: "all",
-      reviewType: "positive",
-      dayRange: 365,
-      numPerPage: 100,
-    }),
-    fetchReviews(appId, {
-      filter: "all",
-      reviewType: "negative",
-      dayRange: 365,
-      numPerPage: 100,
-    }),
+    fetchReviewTypeSample(appId, "positive", positiveTarget, language),
+    negativeTarget > 0 ? fetchReviewTypeSample(appId, "negative", negativeTarget, language) : Promise.resolve([]),
   ]);
 
   const byId = new Map<string, SteamReview>();
-  for (const review of [...positive.reviews.slice(0, 140), ...negative.reviews.slice(0, 60)]) {
-    byId.set(review.recommendationid, review);
-  }
-
+  for (const review of [...positive, ...negative]) byId.set(review.recommendationid, review);
   return Array.from(byId.values()).slice(0, limit);
 }
 
 export async function fetchSteamPurchaseReviewCount(appId: string): Promise<number> {
   const summary = await fetchReviewSummary(appId, "all", "steam");
   return summary.totalReviews;
+}
+
+export async function fetchCurrentPlayers(appId: string): Promise<number | null> {
+  const params = new URLSearchParams({ appid: appId });
+  const res = await fetchWithTimeout(`${STEAM_CURRENT_PLAYERS_API}?${params}`, undefined, 8_000);
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data.response?.result !== 1) return null;
+  return Number(data.response?.player_count ?? 0);
+}
+
+export async function fetchReviewPlaytimeSample(appId: string): Promise<number | null> {
+  const result = await fetchReviews(appId, {
+    filter: "all",
+    language: "all",
+    reviewType: "all",
+    numPerPage: 100,
+  }).catch(() => null);
+  if (!result?.reviews.length) return null;
+
+  const playtimes = result.reviews
+    .map((review) => review.author?.playtime_forever ?? 0)
+    .filter((minutes) => minutes > 0);
+  if (!playtimes.length) return null;
+
+  const averageMinutes = playtimes.reduce((sum, minutes) => sum + minutes, 0) / playtimes.length;
+  return Math.round((averageMinutes / 60) * 10) / 10;
 }
 
 export function toPublicReview(review: SteamReview): PublicReview {
@@ -439,15 +501,11 @@ export function aggregateByLanguage(reviews: SteamReview[] | PublicReview[]): La
   const langMap = new Map<string, { count: number; positive: number; negative: number }>();
 
   for (const review of reviews) {
-    const lang = review.language;
-    const existing = langMap.get(lang) || { count: 0, positive: 0, negative: 0 };
+    const existing = langMap.get(review.language) || { count: 0, positive: 0, negative: 0 };
     existing.count++;
-    if (review.voted_up) {
-      existing.positive++;
-    } else {
-      existing.negative++;
-    }
-    langMap.set(lang, existing);
+    if (review.voted_up) existing.positive++;
+    else existing.negative++;
+    langMap.set(review.language, existing);
   }
 
   return Array.from(langMap.entries())

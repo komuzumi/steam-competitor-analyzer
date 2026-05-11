@@ -2,14 +2,17 @@ import { NextRequest } from "next/server";
 import {
   extractEditionPrices,
   fetchAppDetails,
+  fetchCurrentPlayers,
   fetchLanguageStats,
+  fetchReviewPlaytimeSample,
   fetchReviewSummary,
   fetchSteamPurchaseReviewCount,
   parseReleaseYear,
 } from "@/lib/steam";
-import { estimateSales } from "@/lib/sales";
+import { estimateSteamMarket, salesEstimateFromMarket } from "@/lib/sales";
 import { fetchHistoricalLow } from "@/lib/itad";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
+import { saveMetricSnapshot } from "@/lib/metricsStore";
 import { CurrencyPriceInfo, EditionInfo, GameAnalysis, SSEEvent } from "@/types";
 
 export const maxDuration = 300;
@@ -19,7 +22,7 @@ export async function POST(req: NextRequest) {
   const { appIds } = body as { appIds: string[] };
 
   if (!appIds || !Array.isArray(appIds) || appIds.length === 0 || appIds.length > 5) {
-    return new Response(JSON.stringify({ error: "AppIDは1〜5件で指定してください" }), {
+    return new Response(JSON.stringify({ error: "AppIDは1から5件で指定してください" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
@@ -79,9 +82,11 @@ export async function POST(req: NextRequest) {
 
           send({ type: "progress", appId, appName: gameName, phase: "レビュー概要と言語別集計を取得中..." });
 
-          const [reviewSummary, steamPurchaseReviews] = await Promise.all([
+          const [reviewSummary, steamPurchaseReviews, currentPlayers, averagePlaytimeHours] = await Promise.all([
             fetchReviewSummary(appId),
             fetchSteamPurchaseReviewCount(appId),
+            fetchCurrentPlayers(appId).catch(() => null),
+            fetchReviewPlaytimeSample(appId).catch(() => null),
           ]);
           const languageStats = await fetchLanguageStats(appId, reviewSummary);
           const releaseDate = details.release_date?.date || "不明";
@@ -90,7 +95,20 @@ export async function POST(req: NextRequest) {
             reviewSummary.totalReviews > 0
               ? (reviewSummary.totalPositive / reviewSummary.totalReviews) * 100
               : 0;
-          const salesEstimate = estimateSales(reviewSummary.totalReviews, releaseYear);
+          const usdPrice = prices.USD?.basePrice ?? (details.price_overview?.initial ?? 0) / 100;
+          const defaultPrice = prices.JPY?.basePrice ?? Object.values(prices)[0]?.basePrice ?? 0;
+          const marketEstimate = estimateSteamMarket({
+            totalReviews: reviewSummary.totalReviews,
+            steamPurchaseReviews,
+            releaseYear,
+            priceForMultiplier: usdPrice,
+            basePriceForRevenue: defaultPrice,
+            positiveRate,
+            averagePlaytimeHours,
+            isFree: details.is_free,
+            currentPlayers,
+          });
+          const salesEstimate = salesEstimateFromMarket(marketEstimate);
 
           const result: GameAnalysis = {
             appId,
@@ -105,11 +123,14 @@ export async function POST(req: NextRequest) {
             positiveRate,
             languageStats,
             salesEstimate,
+            marketEstimate,
+            currentPlayers,
             prices,
             editions,
             reviewSamples: [],
           };
 
+          await saveMetricSnapshot(result);
           send({ type: "result", data: result });
         } catch (err) {
           const message = err instanceof Error ? err.message : "不明なエラー";

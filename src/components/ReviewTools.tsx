@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AISummaryResult, GameAnalysis, PublicReview } from "@/types";
 
 type AiMode = "representative" | "full_compressed";
+
+const GEMINI_KEY_STORAGE = "steam-analyzer-gemini-api-key";
 
 function formatNumber(value: number): string {
   return value.toLocaleString("ja-JP");
@@ -72,7 +74,7 @@ function downloadFromUrl(url: string, filename: string) {
 }
 
 function reviewRank(review: PublicReview): number {
-  return review.weighted_vote_score * 100000 + review.votes_up;
+  return review.weighted_vote_score * 100_000 + review.votes_up + review.timestamp_created / 1_000_000;
 }
 
 function compactReview(review: PublicReview): string {
@@ -85,12 +87,12 @@ function formatAiReportText(content: unknown): string {
 
   return text
     .replace(/\r\n/g, "\n")
-    .replace(/([。！？!?])\s*(?!\n|$)/g, "$1\n")
+    .replace(/([。！？?])\s*(?!\n|$)/g, "$1\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-function buildFullReviewCorpus(reviews: PublicReview[]): string {
+function buildFullReviewCorpus(reviews: PublicReview[], languageLabel: string): string {
   const languageMap = new Map<string, { count: number; positive: number; negative: number }>();
   for (const review of reviews) {
     const current = languageMap.get(review.language) ?? { count: 0, positive: 0, negative: 0 };
@@ -109,14 +111,15 @@ function buildFullReviewCorpus(reviews: PublicReview[]): string {
   const positive = reviews
     .filter((review) => review.voted_up)
     .sort((a, b) => reviewRank(b) - reviewRank(a))
-    .slice(0, 80);
+    .slice(0, 90);
   const negative = reviews
     .filter((review) => !review.voted_up)
     .sort((a, b) => reviewRank(b) - reviewRank(a))
-    .slice(0, 80);
+    .slice(0, 90);
   const recent = [...reviews].sort((a, b) => b.timestamp_created - a.timestamp_created).slice(0, 40);
 
   return [
+    `Scope: ${languageLabel}`,
     `Total reviews fetched: ${reviews.length}`,
     "",
     "## Language distribution",
@@ -135,9 +138,65 @@ function buildFullReviewCorpus(reviews: PublicReview[]): string {
 
 function SummarySection({ title, content }: { title: string; content: string }) {
   return (
-    <div className="rounded-lg bg-gray-50 p-3">
-      <p className="mb-1 text-sm font-medium text-gray-700">{title}</p>
-      <p className="whitespace-pre-wrap text-sm leading-6 text-gray-600">{formatAiReportText(content)}</p>
+    <div className="rounded-lg bg-slate-50 p-3">
+      <p className="mb-1 text-sm font-medium text-slate-700">{title}</p>
+      <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{formatAiReportText(content)}</p>
+    </div>
+  );
+}
+
+function getPlaytimeBucket(minutes: number): string {
+  const hours = minutes / 60;
+  if (hours < 1) return "<1h";
+  if (hours < 5) return "1-5h";
+  if (hours < 10) return "5-10h";
+  if (hours < 20) return "10-20h";
+  if (hours < 50) return "20-50h";
+  if (hours < 100) return "50-100h";
+  return "100h+";
+}
+
+function PlaytimeSentimentChart({ reviews }: { reviews: PublicReview[] }) {
+  const buckets = useMemo(() => {
+    const order = ["<1h", "1-5h", "5-10h", "10-20h", "20-50h", "50-100h", "100h+"];
+    const map = new Map(order.map((bucket) => [bucket, { bucket, positive: 0, negative: 0, total: 0 }]));
+    for (const review of reviews) {
+      const bucket = getPlaytimeBucket(review.playtime_forever);
+      const current = map.get(bucket);
+      if (!current) continue;
+      current.total++;
+      if (review.voted_up) current.positive++;
+      else current.negative++;
+    }
+    return order.map((bucket) => map.get(bucket)!).filter((bucket) => bucket.total > 0);
+  }, [reviews]);
+
+  if (!buckets.length) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="mb-3">
+        <p className="text-sm font-semibold text-slate-800">プレイ時間別 好評/不評</p>
+        <p className="text-xs text-slate-500">全文レビュー取得後の一時データだけで集計します。</p>
+      </div>
+      <div className="space-y-2">
+        {buckets.map((bucket) => {
+          const positiveRate = bucket.total > 0 ? (bucket.positive / bucket.total) * 100 : 0;
+          const negativeRate = 100 - positiveRate;
+          return (
+            <div key={bucket.bucket} className="grid grid-cols-[70px_1fr_82px] items-center gap-3 text-xs">
+              <span className="font-medium text-slate-600">{bucket.bucket}</span>
+              <div className="flex h-4 overflow-hidden rounded-full bg-slate-100">
+                <div className="bg-green-500" style={{ width: `${positiveRate}%` }} />
+                <div className="bg-red-500" style={{ width: `${negativeRate}%` }} />
+              </div>
+              <span className="text-right text-slate-500">
+                {positiveRate.toFixed(1)}% / {formatNumber(bucket.total)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -148,27 +207,51 @@ interface Props {
 
 export default function ReviewTools({ data }: Props) {
   const [aiMode, setAiMode] = useState<AiMode>("representative");
+  const [selectedLanguage, setSelectedLanguage] = useState("all");
+  const [geminiApiKey, setGeminiApiKey] = useState(() =>
+    typeof window === "undefined" ? "" : window.localStorage.getItem(GEMINI_KEY_STORAGE) ?? "",
+  );
   const [aiSummary, setAiSummary] = useState<AISummaryResult | undefined>(data.aiSummary);
   const [aiStatus, setAiStatus] = useState<string>("");
-  const [reviewCache, setReviewCache] = useState<PublicReview[] | null>(null);
+  const [reviewCaches, setReviewCaches] = useState<Record<string, PublicReview[]>>({});
   const [fetchProgress, setFetchProgress] = useState<{ fetched: number; total: number } | null>(null);
   const [isFetchingReviews, setIsFetchingReviews] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [csvStatus, setCsvStatus] = useState<string>("");
-  const inFlightFullFetch = useRef<Promise<PublicReview[]> | null>(null);
+  const inFlightFullFetch = useRef<Partial<Record<string, Promise<PublicReview[]>>>>({});
 
-  const cacheLabel = useMemo(() => {
-    if (!reviewCache) return "未取得";
-    return `${formatNumber(reviewCache.length)}件をページ内に一時保持中`;
-  }, [reviewCache]);
+  useEffect(() => {
+    if (geminiApiKey) window.localStorage.setItem(GEMINI_KEY_STORAGE, geminiApiKey);
+    else window.localStorage.removeItem(GEMINI_KEY_STORAGE);
+  }, [geminiApiKey]);
 
-  async function fetchFullReviews(): Promise<PublicReview[]> {
-    if (reviewCache) return reviewCache;
-    if (inFlightFullFetch.current) return inFlightFullFetch.current;
+  const languageOptions = useMemo(
+    () => [
+      { value: "all", label: "全言語" },
+      ...data.languageStats.slice(0, 20).map((stat) => ({
+        value: stat.language,
+        label: stat.displayName ?? stat.language,
+      })),
+    ],
+    [data.languageStats],
+  );
+  const selectedLanguageLabel =
+    languageOptions.find((option) => option.value === selectedLanguage)?.label ?? selectedLanguage;
+  const allReviewCache = reviewCaches.all;
+  const activeReviewCache = reviewCaches[selectedLanguage];
 
-    if (data.totalReviews >= 50_000) {
+  async function fetchFullReviews(language: string): Promise<PublicReview[]> {
+    if (reviewCaches[language]) return reviewCaches[language];
+    if (inFlightFullFetch.current[language]) return inFlightFullFetch.current[language];
+
+    const targetTotal =
+      language === "all"
+        ? data.totalReviews
+        : data.languageStats.find((stat) => stat.language === language)?.count ?? data.totalReviews;
+
+    if (targetTotal >= 50_000) {
       const ok = window.confirm(
-        `${data.name} は約${formatNumber(data.totalReviews)}件のレビューがあります。全文取得は時間とブラウザメモリを多く使う可能性があります。続行しますか？`,
+        `${data.name} の${selectedLanguageLabel}レビューは約${formatNumber(targetTotal)}件あります。全文取得は時間とブラウザメモリを多く使う可能性があります。続行しますか？`,
       );
       if (!ok) throw new Error("全文レビュー取得をキャンセルしました");
     }
@@ -176,11 +259,10 @@ export default function ReviewTools({ data }: Props) {
     const promise = (async () => {
       setIsFetchingReviews(true);
       setCsvStatus("");
-      setFetchProgress({ fetched: 0, total: data.totalReviews });
-      const res = await fetch(`/api/reviews/stream?appId=${encodeURIComponent(data.appId)}`);
-      if (!res.ok || !res.body) {
-        throw new Error(`レビュー取得に失敗しました: ${res.status}`);
-      }
+      setFetchProgress({ fetched: 0, total: targetTotal });
+      const params = new URLSearchParams({ appId: data.appId, language });
+      const res = await fetch(`/api/reviews/stream?${params}`);
+      if (!res.ok || !res.body) throw new Error(`レビュー取得に失敗しました: ${res.status}`);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -208,9 +290,7 @@ export default function ReviewTools({ data }: Props) {
           if (event.type === "meta") setFetchProgress({ fetched: 0, total: event.total });
           if (event.type === "review") {
             reviews.push(event.review);
-            if (event.fetched % 500 === 0) {
-              setFetchProgress({ fetched: event.fetched, total: event.total });
-            }
+            if (event.fetched % 500 === 0) setFetchProgress({ fetched: event.fetched, total: event.total });
           }
           if (event.type === "progress" || event.type === "done") {
             setFetchProgress({ fetched: event.fetched, total: event.total });
@@ -218,17 +298,17 @@ export default function ReviewTools({ data }: Props) {
         }
       }
 
-      setReviewCache(reviews);
+      setReviewCaches((prev) => ({ ...prev, [language]: reviews }));
       return reviews;
     })();
 
-    inFlightFullFetch.current = promise;
+    inFlightFullFetch.current[language] = promise;
 
     try {
       return await promise;
     } finally {
       setIsFetchingReviews(false);
-      inFlightFullFetch.current = null;
+      delete inFlightFullFetch.current[language];
     }
   }
 
@@ -240,18 +320,20 @@ export default function ReviewTools({ data }: Props) {
         appId: data.appId,
         gameName: data.name,
         mode: aiMode,
+        language: selectedLanguage,
+        geminiApiKey: geminiApiKey.trim() || undefined,
       };
 
       if (aiMode === "full_compressed") {
-        setAiStatus("全文レビューを取得中...");
-        const reviews = await fetchFullReviews();
-        setAiStatus("全文レビューを圧縮してAI分析中...");
+        setAiStatus(`${selectedLanguageLabel}の全文レビューを取得中...`);
+        const reviews = await fetchFullReviews(selectedLanguage);
+        setAiStatus(`${selectedLanguageLabel}の全文レビューを圧縮してAI分析中...`);
         body = {
           ...body,
-          corpus: buildFullReviewCorpus(reviews),
+          corpus: buildFullReviewCorpus(reviews, selectedLanguageLabel),
         };
       } else {
-        setAiStatus("代表レビュー200件を取得してAI分析中...");
+        setAiStatus(`${selectedLanguageLabel}の代表レビュー200件を取得してAI分析中...`);
       }
 
       const res = await fetch("/api/ai/analyze", {
@@ -261,12 +343,14 @@ export default function ReviewTools({ data }: Props) {
       });
 
       const payload = await res.json();
-      if (!res.ok) {
-        throw new Error(payload.error || "AI分析に失敗しました");
-      }
+      if (!res.ok) throw new Error(payload.error || "AI分析に失敗しました");
 
       setAiSummary(payload.aiSummary as AISummaryResult);
-      setAiStatus(aiMode === "representative" ? "代表レビューで分析しました" : "全文レビューの圧縮データで分析しました");
+      setAiStatus(
+        aiMode === "representative"
+          ? `${selectedLanguageLabel}の代表レビューで分析しました`
+          : `${selectedLanguageLabel}の全文圧縮データで分析しました`,
+      );
     } catch (err) {
       setAiStatus(err instanceof Error ? err.message : "AI分析に失敗しました");
     } finally {
@@ -277,23 +361,16 @@ export default function ReviewTools({ data }: Props) {
   async function handleCsvDownload() {
     setCsvStatus("");
     try {
-      if (!reviewCache) {
-        const params = new URLSearchParams({
-          appId: data.appId,
-          name: data.name,
-        });
-        downloadFromUrl(
-          `/api/reviews/csv?${params}`,
-          `${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`,
-        );
+      if (!allReviewCache) {
+        const params = new URLSearchParams({ appId: data.appId, name: data.name });
+        downloadFromUrl(`/api/reviews/csv?${params}`, `${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`);
         setCsvStatus("CSVダウンロードを開始しました。未取得の場合はサーバーから直接生成します。");
         return;
       }
 
-      const reviews = await fetchFullReviews();
-      const csv = makeCsv(reviews);
+      const csv = makeCsv(allReviewCache);
       downloadText(`${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`, csv, "text/csv;charset=utf-8");
-      setCsvStatus(reviewCache ? "一時保持データからCSVを生成しました" : "レビューを取得してCSVを生成しました");
+      setCsvStatus("ページ内の一時レビューからCSVを生成しました");
     } catch (err) {
       setCsvStatus(err instanceof Error ? err.message : "CSV生成に失敗しました");
     }
@@ -301,16 +378,53 @@ export default function ReviewTools({ data }: Props) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h4 className="mb-2 font-semibold text-gray-800">AI分析・CSV</h4>
-        <div className="rounded-lg border border-gray-200 bg-white p-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h4 className="font-semibold text-slate-900">AI分析・レビューエクスポート</h4>
+            <p className="text-xs text-slate-500">レビュー本文はDB保存せず、このページのメモリ内だけで一時保持します。</p>
+          </div>
+          <div className="text-xs text-slate-500">
+            全文キャッシュ: {allReviewCache ? `${formatNumber(allReviewCache.length)}件` : "未取得"}
+          </div>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-[1fr_180px_220px]">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">Gemini APIキー</span>
+            <input
+              type="password"
+              value={geminiApiKey}
+              onChange={(event) => setGeminiApiKey(event.target.value)}
+              placeholder="ユーザー側のGemini APIキー（localStorage保存）"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-600">分析対象</span>
+            <select
+              value={selectedLanguage}
+              onChange={(event) => setSelectedLanguage(event.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={isAnalyzing || isFetchingReviews}
+            >
+              {languageOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div>
+            <span className="mb-1 block text-xs font-medium text-slate-600">AIモード</span>
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
               <button
                 type="button"
                 onClick={() => setAiMode("representative")}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md ${
-                  aiMode === "representative" ? "bg-white text-blue-700 shadow-sm" : "text-gray-600"
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium ${
+                  aiMode === "representative" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600"
                 }`}
                 disabled={isAnalyzing || isFetchingReviews}
               >
@@ -319,51 +433,71 @@ export default function ReviewTools({ data }: Props) {
               <button
                 type="button"
                 onClick={() => setAiMode("full_compressed")}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md ${
-                  aiMode === "full_compressed" ? "bg-white text-blue-700 shadow-sm" : "text-gray-600"
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium ${
+                  aiMode === "full_compressed" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600"
                 }`}
                 disabled={isAnalyzing || isFetchingReviews}
               >
-                全文取得＋圧縮
-              </button>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleAiAnalyze}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isAnalyzing || isFetchingReviews}
-              >
-                {isAnalyzing ? "AI分析中..." : "AI分析"}
-              </button>
-              <button
-                type="button"
-                onClick={handleCsvDownload}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isAnalyzing || isFetchingReviews}
-              >
-                {isFetchingReviews ? "取得中..." : "CSV"}
+                全文圧縮
               </button>
             </div>
           </div>
+        </div>
 
-          <div className="mt-3 space-y-1 text-xs text-gray-500">
-            <p>一時レビュー: {cacheLabel}</p>
-            {fetchProgress && (
-              <p>
-                全文取得: {formatNumber(fetchProgress.fetched)} / {formatNumber(fetchProgress.total)}件
-              </p>
-            )}
-            {aiStatus && <p className="text-blue-700">{aiStatus}</p>}
-            {csvStatus && <p className="text-blue-700">{csvStatus}</p>}
-          </div>
+        <details className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+          <summary className="cursor-pointer font-medium text-slate-700">代表200件の定義</summary>
+          <p className="mt-2">
+            直近365日のレビューから最大200件を抽出します。好評/不評の比率を反映しつつ、不評レビューがある場合は最低25%を目安に確保します。
+            抽出時はweighted vote score、参考票数、投稿日時を優先します。
+          </p>
+        </details>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleAiAnalyze}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isAnalyzing || isFetchingReviews}
+          >
+            {isAnalyzing ? "AI分析中..." : "AI分析"}
+          </button>
+          <button
+            type="button"
+            onClick={() => fetchFullReviews("all").catch((err) => setCsvStatus(err.message))}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isAnalyzing || isFetchingReviews}
+          >
+            {isFetchingReviews ? "取得中..." : "全文レビュー取得"}
+          </button>
+          <button
+            type="button"
+            onClick={handleCsvDownload}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isAnalyzing || isFetchingReviews}
+          >
+            CSV
+          </button>
+        </div>
+
+        <div className="mt-3 space-y-1 text-xs text-slate-500">
+          {activeReviewCache && selectedLanguage !== "all" && (
+            <p>{selectedLanguageLabel}: {formatNumber(activeReviewCache.length)}件をページ内に一時保持中</p>
+          )}
+          {fetchProgress && (
+            <p>
+              全文取得: {formatNumber(fetchProgress.fetched)} / {formatNumber(fetchProgress.total)}件
+            </p>
+          )}
+          {aiStatus && <p className="text-blue-700">{aiStatus}</p>}
+          {csvStatus && <p className="text-blue-700">{csvStatus}</p>}
         </div>
       </div>
 
+      {allReviewCache && <PlaytimeSentimentChart reviews={allReviewCache} />}
+
       {aiSummary && (
         <div>
-          <h4 className="mb-2 font-semibold text-gray-800">AI分析レポート</h4>
+          <h4 className="mb-2 font-semibold text-slate-900">AI分析レポート</h4>
           <div className="space-y-3">
             <SummarySection title="高評価の理由" content={aiSummary.positiveReasons} />
             <SummarySection title="低評価の理由" content={aiSummary.negativeReasons} />

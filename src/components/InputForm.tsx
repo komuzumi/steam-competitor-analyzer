@@ -13,15 +13,11 @@ export default function InputForm({ onSubmit, isLoading }: Props) {
   const [error, setError] = useState<string>("");
 
   const addInput = () => {
-    if (inputs.length < 5) {
-      setInputs([...inputs, ""]);
-    }
+    if (inputs.length < 5) setInputs([...inputs, ""]);
   };
 
   const removeInput = (index: number) => {
-    if (inputs.length > 1) {
-      setInputs(inputs.filter((_, i) => i !== index));
-    }
+    if (inputs.length > 1) setInputs(inputs.filter((_, i) => i !== index));
   };
 
   const updateInput = (index: number, value: string) => {
@@ -36,7 +32,7 @@ export default function InputForm({ onSubmit, isLoading }: Props) {
 
     const filledInputs = inputs.filter((input) => input.trim() !== "");
     if (filledInputs.length === 0) {
-      setError("少なくとも1つのSteam URLまたはAppIDを入力してください");
+      setError("Steam URLまたはAppIDを1件以上入力してください");
       return;
     }
 
@@ -44,7 +40,7 @@ export default function InputForm({ onSubmit, isLoading }: Props) {
     for (const input of filledInputs) {
       const appId = extractAppId(input);
       if (!appId) {
-        setError(`「${input}」からAppIDを抽出できません。Steam URLまたは数字のAppIDを入力してください。`);
+        setError(`「${input}」からAppIDを抽出できませんでした。Steam URLまたは数字のAppIDを入力してください。`);
         return;
       }
       appIds.push(appId);
@@ -54,7 +50,7 @@ export default function InputForm({ onSubmit, isLoading }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mx-auto w-full max-w-2xl">
+    <form onSubmit={handleSubmit} className="mx-auto w-full max-w-3xl">
       <div className="space-y-3">
         {inputs.map((input, index) => (
           <div key={index} className="flex gap-2">
@@ -62,7 +58,7 @@ export default function InputForm({ onSubmit, isLoading }: Props) {
               type="text"
               value={input}
               onChange={(e) => updateInput(index, e.target.value)}
-              placeholder="Steam URLまたはAppID（例: 1245620 or https://store.steampowered.com/app/1245620/）"
+              placeholder="Steam URLまたはAppID（例: 1245620 / https://store.steampowered.com/app/1245620/）"
               className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={isLoading}
             />
@@ -72,6 +68,7 @@ export default function InputForm({ onSubmit, isLoading }: Props) {
                 onClick={() => removeInput(index)}
                 className="rounded-lg px-3 py-2 text-red-500 transition-colors hover:bg-red-50"
                 disabled={isLoading}
+                aria-label="入力欄を削除"
               >
                 x
               </button>

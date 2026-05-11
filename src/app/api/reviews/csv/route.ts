@@ -25,6 +25,7 @@ function contentDisposition(filename: string): string {
 export async function GET(req: NextRequest) {
   const appId = req.nextUrl.searchParams.get("appId");
   const name = req.nextUrl.searchParams.get("name") || appId || "steam-reviews";
+  const language = req.nextUrl.searchParams.get("language") || "all";
 
   if (!appId || !/^\d+$/.test(appId)) {
     return new Response(JSON.stringify({ error: "AppIDを指定してください" }), {
@@ -63,12 +64,11 @@ export async function GET(req: NextRequest) {
           const result = await fetchReviews(appId, {
             cursor,
             filter: "recent",
+            language,
             numPerPage: 100,
           });
 
-          if (fetched === 0) {
-            total = result.total_reviews;
-          }
+          if (fetched === 0) total = result.total_reviews;
 
           for (const rawReview of result.reviews) {
             const review = toPublicReview(rawReview);
@@ -106,7 +106,8 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  const filename = `${appId}-${safeFilename(name)}-reviews.csv`;
+  const suffix = language === "all" ? "reviews" : `${language}-reviews`;
+  const filename = `${appId}-${safeFilename(name)}-${suffix}.csv`;
 
   return new Response(stream, {
     headers: {

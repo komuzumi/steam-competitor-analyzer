@@ -4,10 +4,12 @@ import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
+  CartesianGrid,
   Cell,
   Legend,
   Pie,
   PieChart,
+  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -44,7 +46,7 @@ interface Props {
 }
 
 export default function LanguageChart({ stats }: Props) {
-  const [mode, setMode] = useState<"pie" | "bar">("pie");
+  const [mode, setMode] = useState<"pie" | "bar" | "sentiment">("pie");
   const total = useMemo(() => stats.reduce((sum, stat) => sum + stat.count, 0), [stats]);
 
   const pieData = useMemo(() => {
@@ -77,88 +79,92 @@ export default function LanguageChart({ stats }: Props) {
         count: stat.count,
         positive: stat.positive,
         negative: stat.negative,
-        share: percent(stat.count, total),
+        positiveRate: stat.count > 0 ? Math.round((stat.positive / stat.count) * 1000) / 10 : 0,
+        negativeRate: stat.count > 0 ? Math.round((stat.negative / stat.count) * 1000) / 10 : 0,
       })),
-    [stats, total],
+    [stats],
   );
 
   if (stats.length === 0) return null;
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h4 className="font-semibold text-gray-800">言語別レビュー分布</h4>
-          <p className="text-xs text-gray-500">総レビューに対する言語別割合</p>
+          <h4 className="font-semibold text-slate-900">言語別レビュー分布</h4>
+          <p className="text-xs text-slate-500">レビュー件数と好評/不評比率を言語ごとに確認できます。</p>
         </div>
-        <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-1">
-          <button
-            type="button"
-            onClick={() => setMode("pie")}
-            className={`px-3 py-1 text-xs font-medium rounded-md ${
-              mode === "pie" ? "bg-white text-blue-700 shadow-sm" : "text-gray-600"
-            }`}
-          >
-            円
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("bar")}
-            className={`px-3 py-1 text-xs font-medium rounded-md ${
-              mode === "bar" ? "bg-white text-blue-700 shadow-sm" : "text-gray-600"
-            }`}
-          >
-            横棒
-          </button>
+        <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+          {[
+            ["pie", "円"],
+            ["bar", "件数"],
+            ["sentiment", "好評率"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setMode(key as "pie" | "bar" | "sentiment")}
+              className={`rounded-md px-3 py-1 text-xs font-medium ${
+                mode === key ? "bg-white text-blue-700 shadow-sm" : "text-slate-600"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
+      <div className="overflow-x-auto rounded-lg border border-slate-100 bg-white">
         <div className="h-80 min-w-[760px]">
           {mode === "pie" ? (
-            <PieChart width={760} height={320}>
-              <Pie
-                data={pieData}
-                dataKey="value"
-                nameKey="name"
-                cx="50%"
-                cy="50%"
-                outerRadius={110}
-                label={({ value }) => percent(Number(value), total)}
-                labelLine={false}
-              >
-                {pieData.map((entry, index) => (
-                  <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                formatter={(value, _name, item) => {
-                  const numericValue = Number(value ?? 0);
-                  const payload = item.payload as { name?: string } | undefined;
-                  return [
-                    `${compactNumber(numericValue)}件 (${percent(numericValue, total)})`,
-                    payload?.name ?? "",
-                  ];
-                }}
-              />
-              <Legend layout="vertical" align="right" verticalAlign="middle" />
-            </PieChart>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="45%"
+                  cy="50%"
+                  outerRadius={108}
+                  label={({ value }) => percent(Number(value), total)}
+                  labelLine={false}
+                >
+                  {pieData.map((entry, index) => (
+                    <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value, _name, item) => {
+                    const numericValue = Number(value ?? 0);
+                    const payload = item.payload as { name?: string } | undefined;
+                    return [`${compactNumber(numericValue)}件 (${percent(numericValue, total)})`, payload?.name ?? ""];
+                  }}
+                />
+                <Legend layout="vertical" align="right" verticalAlign="middle" />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : mode === "bar" ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={barData} layout="vertical" margin={{ top: 16, right: 24, bottom: 16, left: 92 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" tickFormatter={compactNumber} />
+                <YAxis dataKey="name" type="category" width={138} tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(value) => `${compactNumber(Number(value ?? 0))}件`} />
+                <Bar dataKey="count" name="レビュー数" radius={[0, 6, 6, 0]} fill="#2563eb" />
+              </BarChart>
+            </ResponsiveContainer>
           ) : (
-            <BarChart
-              width={760}
-              height={320}
-              data={barData}
-              layout="vertical"
-              margin={{ top: 16, right: 24, bottom: 16, left: 80 }}
-            >
-              <XAxis type="number" tickFormatter={compactNumber} />
-              <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12 }} />
-              <Tooltip
-                formatter={(value) => `${compactNumber(Number(value ?? 0))}件`}
-                labelFormatter={(label) => `${label}`}
-              />
-              <Bar dataKey="count" name="レビュー数" radius={[0, 6, 6, 0]} fill="#2563eb" />
-            </BarChart>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={barData} layout="vertical" margin={{ top: 16, right: 32, bottom: 16, left: 92 }}>
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
+                <YAxis dataKey="name" type="category" width={138} tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
+                <Legend />
+                <Bar dataKey="positiveRate" stackId="sentiment" name="好評" fill="#16a34a" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="negativeRate" stackId="sentiment" name="不評" fill="#dc2626" radius={[0, 6, 6, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           )}
         </div>
       </div>

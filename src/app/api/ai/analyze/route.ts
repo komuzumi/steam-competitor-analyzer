@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { summarizeReviewCorpus, summarizeReviews } from "@/lib/openai";
-import { fetchRepresentativeReviews } from "@/lib/steam";
+import { fetchRepresentativeReviews, getLanguageDisplayName } from "@/lib/steam";
 
 export const maxDuration = 300;
 
@@ -9,12 +9,16 @@ type RequestBody =
       appId: string;
       gameName: string;
       mode: "representative";
+      language?: string;
+      geminiApiKey?: string;
     }
   | {
       appId: string;
       gameName: string;
       mode: "full_compressed";
+      language?: string;
       corpus: string;
+      geminiApiKey?: string;
     };
 
 export async function POST(req: NextRequest) {
@@ -27,10 +31,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const language = body.language || "all";
+    const languageLabel = language === "all" ? "全言語" : getLanguageDisplayName(language);
+
     if (body.mode === "representative") {
-      const reviews = await fetchRepresentativeReviews(body.appId, 200);
-      const aiSummary = await summarizeReviews(body.gameName, reviews);
-      return Response.json({ aiSummary, reviewCount: reviews.length });
+      const reviews = await fetchRepresentativeReviews(body.appId, 200, language);
+      const aiSummary = await summarizeReviews(body.gameName, reviews, body.geminiApiKey);
+      return Response.json({
+        aiSummary,
+        reviewCount: reviews.length,
+        language,
+        selectionNote: `${languageLabel}の直近365日レビューから、好評/不評を混ぜて最大200件を抽出しました。`,
+      });
     }
 
     if (body.mode === "full_compressed") {
@@ -41,8 +53,13 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const aiSummary = await summarizeReviewCorpus(body.gameName, body.corpus, "full review compressed corpus");
-      return Response.json({ aiSummary });
+      const aiSummary = await summarizeReviewCorpus(
+        body.gameName,
+        body.corpus,
+        `${languageLabel}の全文レビュー圧縮コーパス`,
+        body.geminiApiKey,
+      );
+      return Response.json({ aiSummary, language });
     }
 
     return new Response(JSON.stringify({ error: "未対応のAI分析モードです" }), {
