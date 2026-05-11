@@ -3,6 +3,8 @@ import { summarizeReviewCorpus, summarizeReviews } from "@/lib/openai";
 import { fetchRepresentativeReviews, getLanguageDisplayName } from "@/lib/steam";
 
 export const maxDuration = 300;
+const REVIEW_FETCH_TIMEOUT_MS = 60_000;
+const GEMINI_TIMEOUT_MS = 90_000;
 
 type RequestBody =
   | {
@@ -21,6 +23,21 @@ type RequestBody =
       geminiApiKey?: string;
     };
 
+async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`${label}がタイムアウトしました。時間を置いてもう一度試してください。`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as RequestBody;
@@ -35,8 +52,16 @@ export async function POST(req: NextRequest) {
     const languageLabel = language === "all" ? "全言語" : getLanguageDisplayName(language);
 
     if (body.mode === "representative") {
-      const reviews = await fetchRepresentativeReviews(body.appId, 200, language);
-      const aiSummary = await summarizeReviews(body.gameName, reviews, body.geminiApiKey);
+      const reviews = await withTimeout(
+        fetchRepresentativeReviews(body.appId, 200, language),
+        "代表レビュー取得",
+        REVIEW_FETCH_TIMEOUT_MS,
+      );
+      const aiSummary = await withTimeout(
+        summarizeReviews(body.gameName, reviews, body.geminiApiKey),
+        "Gemini分析",
+        GEMINI_TIMEOUT_MS,
+      );
       return Response.json({
         aiSummary,
         reviewCount: reviews.length,
@@ -53,11 +78,15 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const aiSummary = await summarizeReviewCorpus(
-        body.gameName,
-        body.corpus,
-        `${languageLabel}の全文レビュー圧縮コーパス`,
-        body.geminiApiKey,
+      const aiSummary = await withTimeout(
+        summarizeReviewCorpus(
+          body.gameName,
+          body.corpus,
+          `${languageLabel}の全文レビュー圧縮コーパス`,
+          body.geminiApiKey,
+        ),
+        "Gemini分析",
+        GEMINI_TIMEOUT_MS,
       );
       return Response.json({ aiSummary, language });
     }

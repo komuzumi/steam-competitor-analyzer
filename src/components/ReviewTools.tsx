@@ -6,6 +6,7 @@ import { AISummaryResult, GameAnalysis, PublicReview } from "@/types";
 type AiMode = "representative" | "full_compressed";
 
 const GEMINI_KEY_STORAGE = "steam-analyzer-gemini-api-key";
+const AI_CLIENT_TIMEOUT_MS = 120_000;
 
 function formatNumber(value: number): string {
   return value.toLocaleString("ja-JP");
@@ -213,6 +214,7 @@ export default function ReviewTools({ data }: Props) {
   );
   const [aiSummary, setAiSummary] = useState<AISummaryResult | undefined>(data.aiSummary);
   const [aiStatus, setAiStatus] = useState<string>("");
+  const [aiElapsed, setAiElapsed] = useState(0);
   const [reviewCaches, setReviewCaches] = useState<Record<string, PublicReview[]>>({});
   const [fetchProgress, setFetchProgress] = useState<{ fetched: number; total: number } | null>(null);
   const [isFetchingReviews, setIsFetchingReviews] = useState(false);
@@ -224,6 +226,15 @@ export default function ReviewTools({ data }: Props) {
     if (geminiApiKey) window.localStorage.setItem(GEMINI_KEY_STORAGE, geminiApiKey);
     else window.localStorage.removeItem(GEMINI_KEY_STORAGE);
   }, [geminiApiKey]);
+
+  useEffect(() => {
+    if (!isAnalyzing) return;
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => {
+      setAiElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [isAnalyzing]);
 
   const languageOptions = useMemo(
     () => [
@@ -239,9 +250,15 @@ export default function ReviewTools({ data }: Props) {
     languageOptions.find((option) => option.value === selectedLanguage)?.label ?? selectedLanguage;
   const allReviewCache = reviewCaches.all;
   const activeReviewCache = reviewCaches[selectedLanguage];
+  const visibleAiStatus = isAnalyzing && aiStatus ? `${aiStatus}（${aiElapsed}秒経過）` : aiStatus;
 
   async function fetchFullReviews(language: string): Promise<PublicReview[]> {
     if (reviewCaches[language]) return reviewCaches[language];
+    if (language !== "all" && reviewCaches.all) {
+      const filtered = reviewCaches.all.filter((review) => review.language === language);
+      setReviewCaches((prev) => ({ ...prev, [language]: filtered }));
+      return filtered;
+    }
     if (inFlightFullFetch.current[language]) return inFlightFullFetch.current[language];
 
     const targetTotal =
@@ -314,7 +331,12 @@ export default function ReviewTools({ data }: Props) {
 
   async function handleAiAnalyze() {
     setIsAnalyzing(true);
+    setAiElapsed(0);
     setAiStatus("");
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
+
     try {
       let body: Record<string, unknown> = {
         appId: data.appId,
@@ -327,19 +349,20 @@ export default function ReviewTools({ data }: Props) {
       if (aiMode === "full_compressed") {
         setAiStatus(`${selectedLanguageLabel}の全文レビューを取得中...`);
         const reviews = await fetchFullReviews(selectedLanguage);
-        setAiStatus(`${selectedLanguageLabel}の全文レビューを圧縮してAI分析中...`);
+        setAiStatus(`${selectedLanguageLabel}の全文レビューを圧縮してGeminiで分析中...`);
         body = {
           ...body,
           corpus: buildFullReviewCorpus(reviews, selectedLanguageLabel),
         };
       } else {
-        setAiStatus(`${selectedLanguageLabel}の代表レビュー200件を取得してAI分析中...`);
+        setAiStatus(`${selectedLanguageLabel}の代表レビュー200件を取得し、Geminiで分析中...`);
       }
 
       const res = await fetch("/api/ai/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
 
       const payload = await res.json();
@@ -352,8 +375,13 @@ export default function ReviewTools({ data }: Props) {
           : `${selectedLanguageLabel}の全文圧縮データで分析しました`,
       );
     } catch (err) {
-      setAiStatus(err instanceof Error ? err.message : "AI分析に失敗しました");
+      if ((err as Error).name === "AbortError") {
+        setAiStatus("AI分析がタイムアウトしました。Gemini APIキーや通信状況を確認して、もう一度試してください。");
+      } else {
+        setAiStatus(err instanceof Error ? err.message : "AI分析に失敗しました");
+      }
     } finally {
+      window.clearTimeout(timeout);
       setIsAnalyzing(false);
     }
   }
@@ -363,7 +391,10 @@ export default function ReviewTools({ data }: Props) {
     try {
       if (!allReviewCache) {
         const params = new URLSearchParams({ appId: data.appId, name: data.name });
-        downloadFromUrl(`/api/reviews/csv?${params}`, `${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`);
+        downloadFromUrl(
+          `/api/reviews/csv?${params}`,
+          `${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`,
+        );
         setCsvStatus("CSVダウンロードを開始しました。未取得の場合はサーバーから直接生成します。");
         return;
       }
@@ -481,14 +512,16 @@ export default function ReviewTools({ data }: Props) {
 
         <div className="mt-3 space-y-1 text-xs text-slate-500">
           {activeReviewCache && selectedLanguage !== "all" && (
-            <p>{selectedLanguageLabel}: {formatNumber(activeReviewCache.length)}件をページ内に一時保持中</p>
+            <p>
+              {selectedLanguageLabel}: {formatNumber(activeReviewCache.length)}件をページ内に一時保持中
+            </p>
           )}
           {fetchProgress && (
             <p>
               全文取得: {formatNumber(fetchProgress.fetched)} / {formatNumber(fetchProgress.total)}件
             </p>
           )}
-          {aiStatus && <p className="text-blue-700">{aiStatus}</p>}
+          {visibleAiStatus && <p className="text-blue-700">{visibleAiStatus}</p>}
           {csvStatus && <p className="text-blue-700">{csvStatus}</p>}
         </div>
       </div>
