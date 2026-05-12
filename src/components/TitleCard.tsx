@@ -65,16 +65,30 @@ function getCountryProxyStats(stats: LanguageStat[]): { label: string; percent: 
 function formatAverageDailyConcurrentPlayers(data: GameAnalysis): string {
   const history = data.concurrentPlayersHistory;
   if (history?.averageDailyPlayers != null) return formatShortNumber(history.averageDailyPlayers);
-  if (data.currentPlayers != null) return `履歴不足（現在 ${formatShortNumber(data.currentPlayers)}）`;
-  return "履歴不足";
+  return "平均算出には履歴不足";
 }
 
 function formatAverageDailyConcurrentPlayersNote(data: GameAnalysis): string {
   const history = data.concurrentPlayersHistory;
-  if (!history) return "Supabase未設定、または履歴未取得";
-  if (!history.sampleCount) return `直近${history.periodDays}日の同接スナップショットが未蓄積`;
+  const current = data.currentPlayers == null ? null : `現在同接: ${formatShortNumber(data.currentPlayers)}`;
+  if (!history) return current ? `${current} / Supabase未設定、または履歴未取得` : "Supabase未設定、または履歴未取得";
+  if (!history.sampleCount) {
+    const base = `直近${history.periodDays}日の同接スナップショットが未蓄積`;
+    return current ? `${current} / ${base}` : base;
+  }
   const base = `直近${history.periodDays}日: ${history.capturedDays}日分 / ${history.sampleCount}サンプル`;
   return history.hasEnoughHistory ? `${base}から算出` : `${base}。30日分で精度向上`;
+}
+
+function formatRecentSalesNote(data: GameAnalysis): string {
+  const estimate = data.recentSalesEstimate;
+  if (!estimate) return "直近レビュー取得に失敗";
+
+  const reviewText = `直近${estimate.days}日のSteam購入レビューを最大1,500件まで取得`;
+  if (estimate.isReviewCountCapped) {
+    return `${reviewText}。今回は上限到達のため下限推定`;
+  }
+  return `${reviewText}。取得数: ${formatNumber(estimate.steamPurchaseReviewCount)}件`;
 }
 
 interface Props {
@@ -153,22 +167,26 @@ export default function TitleCard({ data, currency }: Props) {
                     label="Copies sold"
                     value={formatEstimateRange(data.salesEstimate)}
                     note="Steam直接販売本数の推定"
+                    help="Steam購入レビュー数とレビュー倍率から推定した、Steamストア上で販売された本数です。括弧内は保守・強気の推定レンジです。キー配布やバンドル由来の所有者は別枠として扱います。"
                   />
                   <StatItem
                     label="Gross revenue (base game)"
                     value={formatCurrencyRange(grossRevenue, fp)}
                     note="ベースゲーム売上、Steam手数料控除前"
+                    help="推定Steam販売本数にベースゲーム定価と有効販売価格係数を掛けた売上です。セールや地域価格の影響を考慮するため、標準ケースでは定価の60%で計算しています。"
                   />
                   <StatItem
                     label="Gross revenue total (experimental)"
                     value="未対応"
                     note="DLC/IAP/バンドル売上の安定取得元が必要"
+                    help="本編以外のDLC、アプリ内課金、バンドル収益を含む総売上です。現時点ではSteam公開情報だけで安定推定できないため、未対応として表示しています。"
                     muted
                   />
                   <StatItem
                     label="Outstanding wishlists"
                     value="未取得"
                     note="Steam公開APIでは取得不可"
+                    help="未購入ユーザーのウィッシュリスト残数です。Steamの公開APIからは直接取得できないため、外部独自データを使わない方針では未取得になります。"
                     muted
                   />
                   <StatItem
@@ -179,6 +197,7 @@ export default function TitleCard({ data, currency }: Props) {
                       data.marketEstimate.aggressive.ownersEstimate,
                     )}
                     note="所有者推定をプレイヤー総数の近似として表示"
+                    help="実プレイ人数の公開データはないため、現時点では推定所有者数をプレイヤー総数の近似として表示しています。厳密なユニークプレイヤー数ではありません。"
                   />
                   <StatItem
                     label="Owners"
@@ -188,21 +207,40 @@ export default function TitleCard({ data, currency }: Props) {
                       data.marketEstimate.aggressive.ownersEstimate,
                     )}
                     note="レビュー倍率法による推定所有者"
+                    help="総レビュー数に、発売年・価格帯・好評率・平均プレイ時間で補正したレビュー倍率を掛けた推定所有者数です。Steam外キー所有者も含む広い所有者推定です。"
                   />
-                  <StatItem label="Reviews" value={formatShortNumber(data.totalReviews)} note="Steam公開レビュー数" />
-                  <StatItem label="Review score" value={formatPercent(data.positiveRate)} note="好評レビュー比率" />
+                  <StatItem
+                    label="Reviews"
+                    value={formatShortNumber(data.totalReviews)}
+                    note="Steam公開レビュー数"
+                    help="SteamレビューAPIから取得した公開レビュー総数です。言語別集計や売上推定の基礎データとして使います。"
+                  />
+                  <StatItem
+                    label="Review score"
+                    value={formatPercent(data.positiveRate)}
+                    note="好評レビュー比率"
+                    help="好評レビュー数を総レビュー数で割った比率です。Gamalytic風の売上推定では、好評率が高いタイトルほどレビュー倍率をやや高く補正しています。"
+                  />
                   <StatItem
                     label="Average playtime"
                     value={averagePlaytimeHours == null ? "取得不可" : `${averagePlaytimeHours.toFixed(1)}h`}
                     note="レビュー投稿者サンプルから算出"
+                    help="SteamレビューAPIから取得したレビュー投稿者サンプルの総プレイ時間平均です。全ユーザー平均ではありませんが、レビュー倍率補正の参考値として使います。"
                   />
                   <StatItem
                     label="Average daily concurrent players"
                     value={formatAverageDailyConcurrentPlayers(data)}
                     note={formatAverageDailyConcurrentPlayersNote(data)}
+                    help="直近30日分の同時接続者スナップショットがSupabaseに蓄積されている場合、日別平均の平均を表示します。履歴不足時の現在同接は、分析した瞬間の同接であり平均値ではありません。"
                     muted={!data.concurrentPlayersHistory?.hasEnoughHistory}
                   />
-                  <StatItem label="Followers" value="未取得" note="SteamDB等の外部独自データは使わない" muted />
+                  <StatItem
+                    label="Followers"
+                    value="未取得"
+                    note="SteamDB等の外部独自データは使わない"
+                    help="Steamフォロワー数は需要の強さを示す指標ですが、安定した公式公開APIがないため、現時点では外部独自データを取得せず未取得にしています。"
+                    muted
+                  />
                   <StatItem
                     label="Copies sold in the last 7 days"
                     value={
@@ -212,19 +250,17 @@ export default function TitleCard({ data, currency }: Props) {
                           )}`
                         : "未取得"
                     }
-                    note={
-                      data.recentSalesEstimate
-                        ? `直近${data.recentSalesEstimate.days}日のSteam購入レビュー${formatNumber(
-                            data.recentSalesEstimate.steamPurchaseReviewCount,
-                          )}${data.recentSalesEstimate.isReviewCountCapped ? "件以上" : "件"}から推定`
-                        : "直近レビュー取得に失敗"
-                    }
+                    note={formatRecentSalesNote(data)}
+                    help="直近7日のSteam購入レビュー数に、通常のレビュー倍率を掛けて直近販売本数を推定します。人気タイトルでは取得時間を抑えるためレビュー取得を1,500件で打ち切り、上限到達時は>=付きの下限推定として表示します。"
                   />
                 </div>
 
                 <div className="mt-5 rounded-lg bg-slate-50 p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-800">Players by country</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-semibold text-slate-800">Players by country</p>
+                      <HelpTooltip text="Steamから国別プレイヤーの実測値は取得できないため、レビュー言語を国・地域の簡易プロキシとして表示しています。USは英語、CNは簡体字/繁体字中国語、RUはロシア語レビューを近似として扱います。" />
+                    </div>
                     <p className="text-xs text-slate-500">レビュー言語ベースの簡易プロキシ</p>
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-4">
@@ -437,13 +473,48 @@ function Metric({ label, value, color }: { label: string; value: string; color?:
   );
 }
 
-function StatItem({ label, value, note, muted }: { label: string; value: string; note: string; muted?: boolean }) {
+function StatItem({
+  label,
+  value,
+  note,
+  help,
+  muted,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  help?: string;
+  muted?: boolean;
+}) {
   return (
     <div className={`rounded-lg border p-3 ${muted ? "border-slate-100 bg-slate-50" : "border-slate-200 bg-white"}`}>
-      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="text-xs font-medium text-slate-500">{label}</p>
+        {help && <HelpTooltip text={help} />}
+      </div>
       <p className={`mt-1 text-lg font-bold ${muted ? "text-slate-500" : "text-slate-900"}`}>{value}</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">{note}</p>
     </div>
+  );
+}
+
+function HelpTooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        aria-label="説明を表示"
+        className="flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-bold leading-none text-slate-500 hover:border-blue-300 hover:text-blue-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+      >
+        ?
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-6 z-30 hidden w-72 -translate-x-1/2 rounded-md border border-slate-200 bg-white p-3 text-xs font-normal leading-5 text-slate-700 shadow-lg group-hover:block group-focus-within:block"
+      >
+        {text}
+      </span>
+    </span>
   );
 }
 
