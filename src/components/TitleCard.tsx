@@ -168,18 +168,6 @@ export default function TitleCard({ data, currency }: Props) {
                     help="総レビュー数に、発売年・価格帯・好評率・平均プレイ時間で補正したレビュー倍率を掛けた推定所有者数です。実プレイ人数の公開データはないため、プレイヤー総数の近似としても扱います。厳密なユニークプレイヤー数ではありません。"
                   />
                   <StatItem
-                    label="Reviews"
-                    value={formatShortNumber(data.totalReviews)}
-                    note="Steam公開レビュー数"
-                    help="SteamレビューAPIから取得した公開レビュー総数です。言語別集計や売上推定の基礎データとして使います。"
-                  />
-                  <StatItem
-                    label="Review score"
-                    value={formatPercent(data.positiveRate)}
-                    note="好評レビュー比率"
-                    help="好評レビュー数を総レビュー数で割った比率です。Gamalytic風の売上推定では、好評率が高いタイトルほどレビュー倍率をやや高く補正しています。"
-                  />
-                  <StatItem
                     label="Average playtime"
                     value={averagePlaytimeHours == null ? "取得不可" : `${averagePlaytimeHours.toFixed(1)}h`}
                     note="レビュー投稿者サンプルから算出"

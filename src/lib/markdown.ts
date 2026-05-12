@@ -71,8 +71,6 @@ export function generateMarkdownReport(results: GameAnalysis[], currency: Curren
         result.marketEstimate.aggressive.ownersEstimate,
       )}`,
     );
-    lines.push(`- **Reviews:** ${formatNumber(result.totalReviews)}`);
-    lines.push(`- **Review score:** ${result.positiveRate.toFixed(1)}%`);
     lines.push(
       `- **Average playtime:** ${
         result.marketEstimate.explanation.averagePlaytimeHours == null
