@@ -62,6 +62,21 @@ function getCountryProxyStats(stats: LanguageStat[]): { label: string; percent: 
   ];
 }
 
+function formatAverageDailyConcurrentPlayers(data: GameAnalysis): string {
+  const history = data.concurrentPlayersHistory;
+  if (history?.averageDailyPlayers != null) return formatShortNumber(history.averageDailyPlayers);
+  if (data.currentPlayers != null) return `履歴不足（現在 ${formatShortNumber(data.currentPlayers)}）`;
+  return "履歴不足";
+}
+
+function formatAverageDailyConcurrentPlayersNote(data: GameAnalysis): string {
+  const history = data.concurrentPlayersHistory;
+  if (!history) return "Supabase未設定、または履歴未取得";
+  if (!history.sampleCount) return `直近${history.periodDays}日の同接スナップショットが未蓄積`;
+  const base = `直近${history.periodDays}日: ${history.capturedDays}日分 / ${history.sampleCount}サンプル`;
+  return history.hasEnoughHistory ? `${base}から算出` : `${base}。30日分で精度向上`;
+}
+
 interface Props {
   data: GameAnalysis;
   currency: CurrencyCode;
@@ -183,13 +198,9 @@ export default function TitleCard({ data, currency }: Props) {
                   />
                   <StatItem
                     label="Average daily concurrent players"
-                    value={
-                      data.currentPlayers == null
-                        ? "履歴不足"
-                        : `履歴不足（現在 ${formatShortNumber(data.currentPlayers)}）`
-                    }
-                    note="30日以上の同接スナップショット蓄積後に有効化"
-                    muted
+                    value={formatAverageDailyConcurrentPlayers(data)}
+                    note={formatAverageDailyConcurrentPlayersNote(data)}
+                    muted={!data.concurrentPlayersHistory?.hasEnoughHistory}
                   />
                   <StatItem label="Followers" value="未取得" note="SteamDB等の外部独自データは使わない" muted />
                   <StatItem

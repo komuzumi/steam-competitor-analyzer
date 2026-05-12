@@ -91,7 +91,11 @@ export function generateMarkdownReport(results: GameAnalysis[], currency: Curren
     );
     lines.push(
       `- **Average daily concurrent players:** ${
-        result.currentPlayers == null ? "履歴不足" : `履歴不足（現在 ${formatNumber(result.currentPlayers)}）`
+        result.concurrentPlayersHistory?.averageDailyPlayers != null
+          ? `${formatNumber(result.concurrentPlayersHistory.averageDailyPlayers)} (${result.concurrentPlayersHistory.capturedDays}日分 / ${result.concurrentPlayersHistory.sampleCount}サンプル)`
+          : result.currentPlayers == null
+            ? "履歴不足"
+            : `履歴不足（現在 ${formatNumber(result.currentPlayers)}）`
       }`,
     );
     lines.push("- **Followers:** 未取得");
