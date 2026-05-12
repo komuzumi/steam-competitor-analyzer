@@ -1,21 +1,42 @@
 import { NextRequest } from "next/server";
 import { summarizeReviewCorpus, summarizeReviews } from "@/lib/openai";
-import { fetchRepresentativeReviews } from "@/lib/steam";
+import { fetchRepresentativeReviews, getLanguageDisplayName } from "@/lib/steam";
 
 export const maxDuration = 300;
+const REVIEW_FETCH_TIMEOUT_MS = 60_000;
+const GEMINI_TIMEOUT_MS = 90_000;
 
 type RequestBody =
   | {
       appId: string;
       gameName: string;
       mode: "representative";
+      language?: string;
+      geminiApiKey?: string;
     }
   | {
       appId: string;
       gameName: string;
       mode: "full_compressed";
+      language?: string;
       corpus: string;
+      geminiApiKey?: string;
     };
+
+async function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`${label}がタイムアウトしました。時間を置いてもう一度試してください。`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,10 +48,26 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const language = body.language || "all";
+    const languageLabel = language === "all" ? "全言語" : getLanguageDisplayName(language);
+
     if (body.mode === "representative") {
-      const reviews = await fetchRepresentativeReviews(body.appId, 200);
-      const aiSummary = await summarizeReviews(body.gameName, reviews);
-      return Response.json({ aiSummary, reviewCount: reviews.length });
+      const reviews = await withTimeout(
+        fetchRepresentativeReviews(body.appId, 200, language),
+        "代表レビュー取得",
+        REVIEW_FETCH_TIMEOUT_MS,
+      );
+      const aiSummary = await withTimeout(
+        summarizeReviews(body.gameName, reviews, body.geminiApiKey),
+        "Gemini分析",
+        GEMINI_TIMEOUT_MS,
+      );
+      return Response.json({
+        aiSummary,
+        reviewCount: reviews.length,
+        language,
+        selectionNote: `${languageLabel}の直近365日レビューから、好評/不評を混ぜて最大200件を抽出しました。`,
+      });
     }
 
     if (body.mode === "full_compressed") {
@@ -41,8 +78,17 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const aiSummary = await summarizeReviewCorpus(body.gameName, body.corpus, "full review compressed corpus");
-      return Response.json({ aiSummary });
+      const aiSummary = await withTimeout(
+        summarizeReviewCorpus(
+          body.gameName,
+          body.corpus,
+          `${languageLabel}の全文レビュー圧縮コーパス`,
+          body.geminiApiKey,
+        ),
+        "Gemini分析",
+        GEMINI_TIMEOUT_MS,
+      );
+      return Response.json({ aiSummary, language });
     }
 
     return new Response(JSON.stringify({ error: "未対応のAI分析モードです" }), {

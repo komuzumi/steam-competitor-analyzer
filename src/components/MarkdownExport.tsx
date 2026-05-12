@@ -21,21 +21,20 @@ export default function MarkdownExport({ results, currency }: Props) {
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-md p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-bold text-gray-800">Markdownレポート</h3>
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-lg font-bold text-slate-900">Markdownレポート</h3>
         <button
+          type="button"
           onClick={handleCopy}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            copied
-              ? "bg-green-100 text-green-700"
-              : "bg-blue-600 text-white hover:bg-blue-700"
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            copied ? "bg-green-100 text-green-700" : "bg-blue-600 text-white hover:bg-blue-700"
           }`}
         >
-          {copied ? "コピーしました!" : "Markdownをコピー"}
+          {copied ? "コピーしました" : "Markdownをコピー"}
         </button>
       </div>
-      <pre className="bg-gray-50 rounded-lg p-4 text-xs text-gray-700 overflow-x-auto max-h-96 overflow-y-auto whitespace-pre-wrap">
+      <pre className="max-h-96 overflow-y-auto overflow-x-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-4 text-xs text-slate-700">
         {markdown}
       </pre>
     </div>

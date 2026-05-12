@@ -41,6 +41,59 @@ export interface RevenueEstimate {
   aggressive: number;
 }
 
+export interface RecentSalesEstimate {
+  days: number;
+  steamPurchaseReviewCount: number;
+  isReviewCountCapped: boolean;
+  copiesSoldEstimate: SalesEstimate;
+}
+
+export type EstimateCase = "conservative" | "standard" | "aggressive";
+export type EstimateConfidence = "High" | "Medium" | "Low";
+
+export interface MarketEstimateCase {
+  ownersEstimate: number;
+  steamCopiesSoldEstimate: number;
+  grossRevenueEstimate: number;
+  netRevenueAfterSteamFee: number;
+  effectivePriceFactor: number;
+}
+
+export interface MarketEstimateMethod {
+  id: "reviews" | "ccu" | "top_seller_rank" | "public_profiles";
+  label: string;
+  weight: number;
+  status: "active" | "reserved" | "insufficient_data";
+  estimate?: number;
+  note: string;
+}
+
+export interface MarketEstimateExplanation {
+  baseReviewMultiplier: number;
+  adjustedReviewMultiplier: number;
+  ageFactorLabel: string;
+  priceFactor: number;
+  reviewScoreFactor: number;
+  playtimeFactor: number;
+  averagePlaytimeHours: number | null;
+  rawSteamPurchaseReviewShare: number | null;
+  steamPurchaseReviewShare: number;
+  multiplierClampRange: [number, number];
+  steamFeeRate: number;
+  usedData: string[];
+  unusedData: string[];
+  notes: string[];
+}
+
+export interface SteamMarketEstimate {
+  conservative: MarketEstimateCase;
+  standard: MarketEstimateCase;
+  aggressive: MarketEstimateCase;
+  confidence: EstimateConfidence;
+  methods: MarketEstimateMethod[];
+  explanation: MarketEstimateExplanation;
+}
+
 export interface AISummaryResult {
   positiveReasons: string;
   negativeReasons: string;
@@ -78,6 +131,9 @@ export interface GameAnalysis {
   positiveRate: number;
   languageStats: LanguageStat[];
   salesEstimate: SalesEstimate;
+  marketEstimate: SteamMarketEstimate;
+  currentPlayers: number | null;
+  recentSalesEstimate: RecentSalesEstimate | null;
   prices: Record<string, CurrencyPriceInfo>;
   editions: EditionInfo[];
   reviewSamples: { text: string; language: string; votedUp: boolean; playtime: number }[];
@@ -102,7 +158,6 @@ export interface AnalysisResponse {
   errors: { appId: string; message: string }[];
 }
 
-// SSEイベント型
 export type SSEEvent =
   | { type: "progress"; appId: string; appName?: string; phase: string; detail?: string }
   | { type: "result"; data: GameAnalysis }

@@ -1,10 +1,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AISummaryResult, PublicReview, SteamReview } from "@/types";
 
-function getModel() {
-  const apiKey = process.env.GEMINI_API_KEY;
+function getModel(apiKeyOverride?: string) {
+  const apiKey = apiKeyOverride?.trim() || process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY が設定されていません。.env.local を確認してください。");
+    throw new Error("Gemini APIキーが設定されていません。AI分析パネルでAPIキーを入力してください。");
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
@@ -27,9 +27,9 @@ function formatReview(review: SteamReview | PublicReview): string {
 }
 
 function buildPrompt(gameName: string, reviewCorpus: string, corpusLabel: string): string {
-  return `あなたはゲーム業界のアナリストです。Steamゲーム「${gameName}」のユーザーレビューを分析してください。
+  return `あなたはゲーム業界の市場分析担当です。Steamゲーム「${gameName}」のユーザーレビューを分析してください。
 
-以下のレビュー情報は「${corpusLabel}」です。日本語で、競合調査・企画判断に使える具体性を優先してください。
+レビュー情報は「${corpusLabel}」です。日本語で、競合調査・企画判断に使える具体性を優先してください。
 
 ## レビュー情報
 ${reviewCorpus}
@@ -45,9 +45,7 @@ ${reviewCorpus}
 }
 
 function normalizeSummaryField(value: unknown): string {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item)).join("\n");
-  }
+  if (Array.isArray(value)) return value.map((item) => String(item)).join("\n");
   if (typeof value === "string") return value;
   if (value == null) return "";
   return String(value);
@@ -69,13 +67,17 @@ function safeParseSummary(content: string): AISummaryResult {
     return normalizeSummary(JSON.parse(content));
   } catch {
     const match = content.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("Gemini API のJSONレスポンスを解析できませんでした");
+    if (!match) throw new Error("Gemini APIのJSONレスポンスを解析できませんでした");
     return normalizeSummary(JSON.parse(match[0]));
   }
 }
 
-export async function summarizeReviews(gameName: string, reviews: SteamReview[]): Promise<AISummaryResult> {
-  const positiveReviews = reviews.filter((review) => review.voted_up).slice(0, 80);
+export async function summarizeReviews(
+  gameName: string,
+  reviews: SteamReview[],
+  apiKey?: string,
+): Promise<AISummaryResult> {
+  const positiveReviews = reviews.filter((review) => review.voted_up).slice(0, 120);
   const negativeReviews = reviews.filter((review) => !review.voted_up).slice(0, 80);
   const corpus = [
     "## Positive reviews",
@@ -84,20 +86,21 @@ export async function summarizeReviews(gameName: string, reviews: SteamReview[])
     negativeReviews.map(formatReview).join("\n---\n"),
   ].join("\n\n");
 
-  return summarizeReviewCorpus(gameName, corpus, `Steam helpfulness order sample (${reviews.length} reviews)`);
+  return summarizeReviewCorpus(gameName, corpus, `代表レビューサンプル（${reviews.length}件）`, apiKey);
 }
 
 export async function summarizeReviewCorpus(
   gameName: string,
   reviewCorpus: string,
   corpusLabel: string,
+  apiKey?: string,
 ): Promise<AISummaryResult> {
-  const model = getModel();
+  const model = getModel(apiKey);
   const result = await model.generateContent(buildPrompt(gameName, reviewCorpus, corpusLabel));
   const content = result.response.text();
 
   if (!content) {
-    throw new Error("Gemini API から空のレスポンスが返りました");
+    throw new Error("Gemini APIから空のレスポンスが返りました");
   }
 
   return safeParseSummary(content);

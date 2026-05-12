@@ -4,8 +4,8 @@ export interface CurrencyOption {
   code: CurrencyCode;
   label: string;
   symbol: string;
-  steamCC: string; // Steam API cc parameter
-  itadCountry: string; // ITAD API country code
+  steamCC: string;
+  itadCountry: string;
   decimals: number;
 }
 
@@ -17,14 +17,14 @@ export const CURRENCY_OPTIONS: CurrencyOption[] = [
 ];
 
 export function getCurrencyOption(code: CurrencyCode): CurrencyOption {
-  return CURRENCY_OPTIONS.find((c) => c.code === code) || CURRENCY_OPTIONS[0];
+  return CURRENCY_OPTIONS.find((currency) => currency.code === code) || CURRENCY_OPTIONS[0];
 }
 
 export function formatPrice(amount: number, code: CurrencyCode): string {
-  const opt = getCurrencyOption(code);
+  const option = getCurrencyOption(code);
   const formatted = amount.toLocaleString("ja-JP", {
-    minimumFractionDigits: opt.decimals,
-    maximumFractionDigits: opt.decimals,
+    minimumFractionDigits: option.decimals,
+    maximumFractionDigits: option.decimals,
   });
-  return `${opt.symbol}${formatted}`;
+  return `${option.symbol}${formatted}`;
 }

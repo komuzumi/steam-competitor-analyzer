@@ -122,7 +122,7 @@ export default function Home() {
       }
     } catch (err) {
       if (timedOut) {
-        setGlobalError("分析がタイムアウトしました。通信状態を確認して、もう一度試してください。");
+        setGlobalError("分析がタイムアウトしました。通信状況を確認して、もう一度試してください。");
         return;
       }
       if ((err as Error).name === "AbortError") return;
@@ -135,12 +135,14 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-gray-100">
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-gray-900">Steam 競合調査AIレポート</h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Steam URLまたはAppIDを入力すると、価格・レビュー分布・仮説売上を取得します。AI分析と全文CSVは必要な時だけ実行します。
+    <main className="min-h-screen bg-slate-100">
+      <div className="mx-auto max-w-7xl px-4 py-8">
+        <div className="mb-8">
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-700">Steam market dashboard</p>
+          <h1 className="mt-2 text-3xl font-bold text-slate-950">Steam 競合・市場分析ダッシュボード</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+            Steam公開情報をもとに、価格、レビュー、言語構成、推定販売本数、推定売上、現在同時接続者数を分析します。
+            AI分析と全文CSVは必要な時だけ実行します。
           </p>
         </div>
 

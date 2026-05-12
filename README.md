@@ -1,77 +1,108 @@
-# Steam 競合調査AIレポート
+# Steam 競合・市場分析ダッシュボード
 
-Steam上の競合タイトルを調査し、レビュー傾向・言語別反応・仮説売上・AI要約を日本語で確認できるWebアプリです。
+Steam公開情報をもとに、競合タイトルの価格、レビュー、言語構成、推定販売本数、推定売上、現在同時接続者数、AIレビュー分析を確認するWebアプリです。
 
 ## セットアップ
 
-### 前提条件
-
-- Node.js 18以上
-- Gemini APIキー
-
-### インストール
-
 ```bash
-cd steam-competitor-analyzer
 npm install
-```
-
-### .env.localの設定
-
-プロジェクトルートに `.env.local` ファイルを作成し、Gemini APIキーを設定します。
-
-```
-Gemini_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-`.env.local.example` をコピーして使うこともできます：
-
-```bash
-cp .env.local.example .env.local
-```
-
-## 起動方法
-
-```bash
 npm run dev
 ```
 
 ブラウザで http://localhost:3000 を開きます。
 
-## 使い方
+## 環境変数
 
-1. トップページのフォームにSteam URLまたはAppIDを入力（最大5件）
-   - 例: `1245620`
-   - 例: `https://store.steampowered.com/app/1245620/ELDEN_RING/`
-2. 「+ タイトル追加」ボタンで入力欄を追加
-3. 「分析開始」ボタンをクリック
-4. 分析完了後、以下が表示されます：
-   - 比較テーブル（複数タイトル入力時）
-   - タイトル別の詳細カード
-     - レビュー概要（総数・ポジティブ/ネガティブ・好評率）
-     - 仮説販売本数・売上（保守/標準/強気の3ケース）
-     - 言語別レビュー分布
-     - AI分析レポート（高評価理由・低評価理由・頻出不満・企画示唆・海外展開注意点）
-   - Markdownレポート（コピーボタンでクリップボードにコピー可能）
+`.env.local.example` をコピーして `.env.local` を作成できます。
 
-## 現時点の制限
+```bash
+cp .env.local.example .env.local
+```
 
-- **Steam API制限**: レビューの取得数は選択肢から選択可能。言語別集計はサンプル内の比率です。
-- **レート制限**: Steam APIのレート制限により、複数タイトルの同時分析は時間がかかります。
-- **仮説売上**: Boxleiterメソッドベースの推定であり、実際の売上とは異なります。参考値としてお使いください。
-- **AI要約**: Gemini APIキーが未設定の場合、AI要約セクションはスキップされます。
-- **認証なし**: ログイン機能はありません。
-- **データ保存なし**: 分析結果はブラウザ上のみで保持され、リロードで消えます。
+利用する環境変数:
 
-## 今後追加すべき機能
+- `GEMINI_API_KEY`: 開発用フォールバック。商用提供時はユーザーが画面で入力したGemini APIキーを優先します。
+- `ITAD_API_KEY`: IsThereAnyDealの過去最安価格取得に使います。未設定でも動作します。
+- `SUPABASE_URL`: 軽量メタ情報スナップショットの保存先。未設定なら保存をスキップします。
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase保存用キー。未設定なら保存をスキップします。
 
-- レビューの時系列分析（月別推移グラフ）
-- タグ・ジャンル情報の取得と分析
-- 日本円での売上表示
-- レポートのPDFエクスポート
-- 分析履歴の保存（DB連携）
-- ユーザー認証
-- ウィッシュリスト数の推定
-- 同時接続数データの取得（SteamCharts連携）
-- より多くのレビューサンプルの取得
-- Claude API対応（OpenAI以外のLLM選択）
+## 主な機能
+
+- Steam URLまたはAppIDを最大5件まで分析
+- 価格、エディション、過去最安価格の表示
+- 総レビュー、Steam購入レビュー、好評率、言語別レビュー集計
+- 現在同時接続者数の表示
+- Gamalytic公開記事の考え方を参考にした説明可能な販売本数・売上推定
+- 総売上とSteam手数料30%控除後売上の表示
+- 言語別レビュー件数、言語別好評/不評比率のグラフ表示
+- 代表200件または全文圧縮による任意AI分析
+- 言語を指定したAIレビュー分析
+- 全文レビュー取得後のプレイ時間別好評/不評グラフ
+- CSV出力とMarkdownレポート出力
+
+## 売上推定ロジック
+
+売上推定はGamalyticの公開記事で触れられているレビュー倍率法を参考にした独自実装です。Gamalyticの非公開モデルや有料データは使っていません。
+
+標準ケースでは、以下の流れで推定します。
+
+1. 発売経過年数から基準レビュー倍率を決める。
+2. 価格帯、好評率、レビュー投稿者の平均プレイ時間サンプルで倍率を補正する。
+3. 最終倍率を18から85の範囲に収める。
+4. `推定所有者 = 総レビュー数 * 最終レビュー倍率` とする。
+5. `推定Steam販売本数 = 推定所有者 * Steam購入レビュー比率` とする。
+6. `総売上 = 推定Steam販売本数 * 定価 * 実効価格係数` とする。
+7. `手数料控除後売上 = 総売上 * 0.70` とする。
+
+保守、標準、強気の3ケースを表示します。トップセラー順位、公開プロフィールpolling、同時接続者数履歴による推定は予約済みですが、初期実装では重み0です。
+
+## データ保存方針
+
+Supabaseが設定されている場合、分析時に軽量メタ情報だけ保存します。
+
+保存するもの:
+
+- AppID、タイトル名、取得日時
+- 価格、レビュー数、Steam購入レビュー数、好評率
+- 言語別集計
+- 現在同時接続者数
+- 推定所有者、推定Steam販売本数、総売上、手数料控除後売上、推定信頼度
+
+保存しないもの:
+
+- レビュー本文
+- SteamID
+- レビューID
+- Gemini APIキー
+
+レビュー本文はCSV出力やAI分析のために一時的にブラウザメモリへ保持します。ページをリロードすると破棄されます。
+
+## Supabaseテーブル例
+
+```sql
+create table if not exists game_metric_snapshots (
+  id bigserial primary key,
+  app_id text not null,
+  name text not null,
+  captured_at timestamptz not null default now(),
+  base_price numeric,
+  current_price numeric,
+  review_count integer not null,
+  steam_purchase_review_count integer not null,
+  positive_rate numeric not null,
+  language_stats jsonb not null,
+  current_players integer,
+  estimated_owners integer not null,
+  estimated_steam_copies_sold integer not null,
+  gross_revenue numeric not null,
+  net_revenue_after_steam_fee numeric not null,
+  confidence text not null
+);
+```
+
+## 注意点
+
+- 推定値は実売上ではありません。競合調査用の参考値として扱ってください。
+- 無料ゲームのベースゲーム売上は信頼度Lowになります。IAP/DLC売上は対象外です。
+- 同時接続者数は現在値のみです。履歴推定はスナップショットが十分に貯まってから追加します。
+- 大型タイトルの全文レビュー取得は時間とブラウザメモリを多く使います。
