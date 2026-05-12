@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { GameAnalysis, LanguageStat, SalesEstimate } from "@/types";
 import { CurrencyCode, formatPrice } from "@/lib/currency";
@@ -499,21 +499,42 @@ function StatItem({
 }
 
 function HelpTooltip({ text }: { text: string }) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+
+  function showTooltip() {
+    const button = buttonRef.current;
+    if (!button) return;
+
+    const rect = button.getBoundingClientRect();
+    const tooltipWidth = Math.min(288, window.innerWidth - 24);
+    const left = Math.min(Math.max(rect.left + rect.width / 2 - tooltipWidth / 2, 12), window.innerWidth - tooltipWidth - 12);
+    const top = Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - 160));
+    setPosition({ left, top });
+  }
+
   return (
-    <span className="group relative inline-flex">
+    <span className="relative inline-flex" onMouseLeave={() => setPosition(null)}>
       <button
+        ref={buttonRef}
         type="button"
         aria-label="説明を表示"
+        onFocus={showTooltip}
+        onBlur={() => setPosition(null)}
+        onMouseEnter={showTooltip}
         className="flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-bold leading-none text-slate-500 hover:border-blue-300 hover:text-blue-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
       >
         ?
       </button>
-      <span
-        role="tooltip"
-        className="pointer-events-none absolute left-1/2 top-6 z-30 hidden w-72 -translate-x-1/2 rounded-md border border-slate-200 bg-white p-3 text-xs font-normal leading-5 text-slate-700 shadow-lg group-hover:block group-focus-within:block"
-      >
-        {text}
-      </span>
+      {position && (
+        <span
+          role="tooltip"
+          className="pointer-events-none fixed z-50 w-72 max-w-[calc(100vw-1.5rem)] rounded-md border border-slate-200 bg-white p-3 text-xs font-normal leading-5 text-slate-700 shadow-lg"
+          style={{ left: position.left, top: position.top }}
+        >
+          {text}
+        </span>
+      )}
     </span>
   );
 }
