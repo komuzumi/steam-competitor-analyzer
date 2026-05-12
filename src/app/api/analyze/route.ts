@@ -13,7 +13,7 @@ import {
 import { estimateRecentSteamCopiesFromReviews, estimateSteamMarket, salesEstimateFromMarket } from "@/lib/sales";
 import { fetchHistoricalLow } from "@/lib/itad";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
-import { fetchConcurrentPlayersHistory, saveMetricSnapshot } from "@/lib/metricsStore";
+import { saveMetricSnapshot } from "@/lib/metricsStore";
 import { CurrencyPriceInfo, EditionInfo, GameAnalysis, SSEEvent } from "@/types";
 
 export const maxDuration = 300;
@@ -159,7 +159,6 @@ export async function POST(req: NextRequest) {
               salesEstimate,
               marketEstimate,
               currentPlayers,
-              concurrentPlayersHistory: null,
               recentSalesEstimate,
               prices,
               editions,
@@ -168,7 +167,6 @@ export async function POST(req: NextRequest) {
 
             send({ type: "progress", appId, appName: gameName, phase: "分析結果を保存・整形中..." });
             await saveMetricSnapshot(result);
-            result.concurrentPlayersHistory = await fetchConcurrentPlayersHistory(appId, 30).catch(() => null);
             send({ type: "result", data: result });
           } catch (err) {
             const message = err instanceof Error ? err.message : "不明なエラー";

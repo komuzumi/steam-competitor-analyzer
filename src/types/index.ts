@@ -48,16 +48,6 @@ export interface RecentSalesEstimate {
   copiesSoldEstimate: SalesEstimate;
 }
 
-export interface ConcurrentPlayersHistory {
-  periodDays: number;
-  capturedDays: number;
-  sampleCount: number;
-  averageDailyPlayers: number | null;
-  firstCapturedAt: string | null;
-  lastCapturedAt: string | null;
-  hasEnoughHistory: boolean;
-}
-
 export type EstimateCase = "conservative" | "standard" | "aggressive";
 export type EstimateConfidence = "High" | "Medium" | "Low";
 
@@ -143,7 +133,6 @@ export interface GameAnalysis {
   salesEstimate: SalesEstimate;
   marketEstimate: SteamMarketEstimate;
   currentPlayers: number | null;
-  concurrentPlayersHistory: ConcurrentPlayersHistory | null;
   recentSalesEstimate: RecentSalesEstimate | null;
   prices: Record<string, CurrencyPriceInfo>;
   editions: EditionInfo[];

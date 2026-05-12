@@ -62,24 +62,6 @@ function getCountryProxyStats(stats: LanguageStat[]): { label: string; percent: 
   ];
 }
 
-function formatAverageDailyConcurrentPlayers(data: GameAnalysis): string {
-  const history = data.concurrentPlayersHistory;
-  if (history?.averageDailyPlayers != null) return formatShortNumber(history.averageDailyPlayers);
-  return "平均算出には履歴不足";
-}
-
-function formatAverageDailyConcurrentPlayersNote(data: GameAnalysis): string {
-  const history = data.concurrentPlayersHistory;
-  const current = data.currentPlayers == null ? null : `現在同接: ${formatShortNumber(data.currentPlayers)}`;
-  if (!history) return current ? `${current} / Supabase未設定、または履歴未取得` : "Supabase未設定、または履歴未取得";
-  if (!history.sampleCount) {
-    const base = `直近${history.periodDays}日の同接スナップショットが未蓄積`;
-    return current ? `${current} / ${base}` : base;
-  }
-  const base = `直近${history.periodDays}日: ${history.capturedDays}日分 / ${history.sampleCount}サンプル`;
-  return history.hasEnoughHistory ? `${base}から算出` : `${base}。30日分で精度向上`;
-}
-
 function formatRecentSalesNote(data: GameAnalysis): string {
   const estimate = data.recentSalesEstimate;
   if (!estimate) return "直近レビュー取得に失敗";
@@ -176,20 +158,6 @@ export default function TitleCard({ data, currency }: Props) {
                     help="推定Steam販売本数にベースゲーム定価と有効販売価格係数を掛けた売上です。セールや地域価格の影響を考慮するため、標準ケースでは定価の60%で計算しています。"
                   />
                   <StatItem
-                    label="Gross revenue total (experimental)"
-                    value="未対応"
-                    note="DLC/IAP/バンドル売上の安定取得元が必要"
-                    help="本編以外のDLC、アプリ内課金、バンドル収益を含む総売上です。現時点ではSteam公開情報だけで安定推定できないため、未対応として表示しています。"
-                    muted
-                  />
-                  <StatItem
-                    label="Outstanding wishlists"
-                    value="未取得"
-                    note="Steam公開APIでは取得不可"
-                    help="未購入ユーザーのウィッシュリスト残数です。Steamの公開APIからは直接取得できないため、外部独自データを使わない方針では未取得になります。"
-                    muted
-                  />
-                  <StatItem
                     label="Players total"
                     value={formatEstimateRangeFromCases(
                       data.marketEstimate.standard.ownersEstimate,
@@ -226,20 +194,6 @@ export default function TitleCard({ data, currency }: Props) {
                     value={averagePlaytimeHours == null ? "取得不可" : `${averagePlaytimeHours.toFixed(1)}h`}
                     note="レビュー投稿者サンプルから算出"
                     help="SteamレビューAPIから取得したレビュー投稿者サンプルの総プレイ時間平均です。全ユーザー平均ではありませんが、レビュー倍率補正の参考値として使います。"
-                  />
-                  <StatItem
-                    label="Average daily concurrent players"
-                    value={formatAverageDailyConcurrentPlayers(data)}
-                    note={formatAverageDailyConcurrentPlayersNote(data)}
-                    help="直近30日分の同時接続者スナップショットがSupabaseに蓄積されている場合、日別平均の平均を表示します。履歴不足時の現在同接は、分析した瞬間の同接であり平均値ではありません。"
-                    muted={!data.concurrentPlayersHistory?.hasEnoughHistory}
-                  />
-                  <StatItem
-                    label="Followers"
-                    value="未取得"
-                    note="SteamDB等の外部独自データは使わない"
-                    help="Steamフォロワー数は需要の強さを示す指標ですが、安定した公式公開APIがないため、現時点では外部独自データを取得せず未取得にしています。"
-                    muted
                   />
                   <StatItem
                     label="Copies sold in the last 7 days"

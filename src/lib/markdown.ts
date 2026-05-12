@@ -64,8 +64,6 @@ export function generateMarkdownReport(results: GameAnalysis[], currency: Curren
     lines.push(
       `- **Gross revenue (base game):** ${fp(gross.standard)} (${fp(gross.conservative)} - ${fp(gross.aggressive)})`,
     );
-    lines.push("- **Gross revenue total (experimental):** 未対応");
-    lines.push("- **Outstanding wishlists:** 未取得");
     lines.push(
       `- **Players total:** ${formatRange(
         result.marketEstimate.standard.ownersEstimate,
@@ -89,16 +87,6 @@ export function generateMarkdownReport(results: GameAnalysis[], currency: Curren
           : `${result.marketEstimate.explanation.averagePlaytimeHours.toFixed(1)}h`
       }`,
     );
-    lines.push(
-      `- **Average daily concurrent players:** ${
-        result.concurrentPlayersHistory?.averageDailyPlayers != null
-          ? `${formatNumber(result.concurrentPlayersHistory.averageDailyPlayers)} (${result.concurrentPlayersHistory.capturedDays}日分 / ${result.concurrentPlayersHistory.sampleCount}サンプル)`
-          : result.currentPlayers == null
-            ? "履歴不足"
-            : `履歴不足（現在 ${formatNumber(result.currentPlayers)}）`
-      }`,
-    );
-    lines.push("- **Followers:** 未取得");
     lines.push(
       `- **Copies sold in the last 7 days:** ${
         result.recentSalesEstimate
