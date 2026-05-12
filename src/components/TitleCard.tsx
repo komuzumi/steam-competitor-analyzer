@@ -158,16 +158,6 @@ export default function TitleCard({ data, currency }: Props) {
                     help="推定Steam販売本数にベースゲーム定価と有効販売価格係数を掛けた売上です。セールや地域価格の影響を考慮するため、標準ケースでは定価の60%で計算しています。"
                   />
                   <StatItem
-                    label="Players total"
-                    value={formatEstimateRangeFromCases(
-                      data.marketEstimate.standard.ownersEstimate,
-                      data.marketEstimate.conservative.ownersEstimate,
-                      data.marketEstimate.aggressive.ownersEstimate,
-                    )}
-                    note="所有者推定をプレイヤー総数の近似として表示"
-                    help="実プレイ人数の公開データはないため、現時点では推定所有者数をプレイヤー総数の近似として表示しています。厳密なユニークプレイヤー数ではありません。"
-                  />
-                  <StatItem
                     label="Owners"
                     value={formatEstimateRangeFromCases(
                       data.marketEstimate.standard.ownersEstimate,
@@ -175,7 +165,7 @@ export default function TitleCard({ data, currency }: Props) {
                       data.marketEstimate.aggressive.ownersEstimate,
                     )}
                     note="レビュー倍率法による推定所有者"
-                    help="総レビュー数に、発売年・価格帯・好評率・平均プレイ時間で補正したレビュー倍率を掛けた推定所有者数です。Steam外キー所有者も含む広い所有者推定です。"
+                    help="総レビュー数に、発売年・価格帯・好評率・平均プレイ時間で補正したレビュー倍率を掛けた推定所有者数です。実プレイ人数の公開データはないため、プレイヤー総数の近似としても扱います。厳密なユニークプレイヤー数ではありません。"
                   />
                   <StatItem
                     label="Reviews"

@@ -65,13 +65,6 @@ export function generateMarkdownReport(results: GameAnalysis[], currency: Curren
       `- **Gross revenue (base game):** ${fp(gross.standard)} (${fp(gross.conservative)} - ${fp(gross.aggressive)})`,
     );
     lines.push(
-      `- **Players total:** ${formatRange(
-        result.marketEstimate.standard.ownersEstimate,
-        result.marketEstimate.conservative.ownersEstimate,
-        result.marketEstimate.aggressive.ownersEstimate,
-      )}`,
-    );
-    lines.push(
       `- **Owners:** ${formatRange(
         result.marketEstimate.standard.ownersEstimate,
         result.marketEstimate.conservative.ownersEstimate,
