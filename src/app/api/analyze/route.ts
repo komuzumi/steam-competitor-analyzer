@@ -13,7 +13,6 @@ import {
 import { estimateRecentSteamCopiesFromReviews, estimateSteamMarket, salesEstimateFromMarket } from "@/lib/sales";
 import { fetchHistoricalLow } from "@/lib/itad";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
-import { saveMetricSnapshot } from "@/lib/metricsStore";
 import { CurrencyPriceInfo, EditionInfo, GameAnalysis, SSEEvent } from "@/types";
 
 export const maxDuration = 300;
@@ -128,7 +127,6 @@ export async function POST(req: NextRequest) {
               positiveRate,
               averagePlaytimeHours,
               isFree: details.is_free,
-              currentPlayers,
             });
             const salesEstimate = salesEstimateFromMarket(marketEstimate);
             const recentSalesEstimate =
@@ -165,8 +163,6 @@ export async function POST(req: NextRequest) {
               reviewSamples: [],
             };
 
-            send({ type: "progress", appId, appName: gameName, phase: "分析結果を保存・整形中..." });
-            await saveMetricSnapshot(result);
             send({ type: "result", data: result });
           } catch (err) {
             const message = err instanceof Error ? err.message : "不明なエラー";

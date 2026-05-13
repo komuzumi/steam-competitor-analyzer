@@ -24,7 +24,6 @@ interface SteamMarketEstimateInput {
   positiveRate: number;
   averagePlaytimeHours?: number | null;
   isFree?: boolean;
-  currentPlayers?: number | null;
   currentYear?: number;
 }
 
@@ -39,7 +38,7 @@ function getAgeMultiplier(releaseYear: number, currentYear: number): { multiplie
   if (age <= 4) return { multiplier: 38, label: "発売から4年以内" };
   if (age <= 7) return { multiplier: 45, label: "発売から7年以内" };
   if (age <= 10) return { multiplier: 52, label: "発売から10年以内" };
-  return { multiplier: 60, label: "発売から10年以上" };
+  return { multiplier: 60, label: "発売から10年超" };
 }
 
 function getPriceFactor(price: number): number {
@@ -117,12 +116,13 @@ export function estimateSteamMarket(input: SteamMarketEstimateInput): SteamMarke
     "価格帯",
     "好評率",
   ];
-  if (input.averagePlaytimeHours != null) usedData.push("レビュー投稿者の平均プレイ時間サンプル");
-  if (input.currentPlayers != null) usedData.push("現在同時接続者数（表示とスナップショット用）");
+  if (input.averagePlaytimeHours != null) {
+    usedData.push("レビュー投稿者の平均プレイ時間サンプル");
+  }
 
   const notes = [
     "Gamalyticの公開記事で触れられているレビュー倍率法を参考にした独自実装です。",
-    "同時接続者数は現時点では売上推定に混ぜず、履歴が30日以上貯まった後の補助推定として予約しています。",
+    "現在同時接続者数は画面表示のみで、売上推定には使いません。DB保存もしません。",
     "トップセラー順位と公開プロフィール推定は、取得元と運用ルールが固まるまで重み0の予約メソッドです。",
   ];
   if (input.isFree) {
@@ -162,8 +162,8 @@ export function estimateSteamMarket(input: SteamMarketEstimateInput): SteamMarke
         id: "ccu",
         label: "同時接続者数ベース推定",
         weight: 0,
-        status: "insufficient_data",
-        note: "現在値は表示しますが、30日以上の履歴が貯まるまで売上推定には混ぜません。",
+        status: "reserved",
+        note: "現在同時接続者数は表示のみです。DB履歴を持たない方針のため、売上推定には混ぜません。",
       },
       {
         id: "top_seller_rank",
@@ -193,7 +193,7 @@ export function estimateSteamMarket(input: SteamMarketEstimateInput): SteamMarke
       multiplierClampRange: REVIEW_MULTIPLIER_RANGE,
       steamFeeRate: STEAM_FEE_RATE,
       usedData,
-      unusedData: ["同時接続者数履歴", "トップセラー順位", "公開プロフィールpolling"],
+      unusedData: ["同時接続者数", "トップセラー順位", "公開プロフィールpolling"],
       notes,
     },
   };

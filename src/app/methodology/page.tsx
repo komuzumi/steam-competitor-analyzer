@@ -120,7 +120,7 @@ export default function MethodologyPage() {
           <Section title="1. 使うデータ">
             <p className="text-sm leading-7 text-slate-600">
               初回分析ではレビュー本文を取得せず、Steam公開APIなどから取れる軽量データを使います。主に使うのは、総レビュー数、Steam購入レビュー数、発売年、USD基準価格、表示通貨の定価、好評率、レビュー投稿者サンプルの平均プレイ時間です。
-              現在同時接続者数は表示とスナップショット保存には使いますが、履歴が十分に貯まるまでは売上推定には混ぜません。
+              現在同時接続者数は画面上の参考情報として表示しますが、DBには保存せず、売上推定にも混ぜません。
             </p>
             <div className="grid gap-3 md:grid-cols-2">
               {[
@@ -229,8 +229,8 @@ export default function MethodologyPage() {
 
           <Section title="8. 使っていないデータと注意点">
             <p className="text-sm leading-7 text-slate-600">
-              現時点では、同時接続者数の履歴、トップセラー順位、公開プロフィールpolling、ウィッシュリスト、DLC/IAP売上、国別の実売上データは推定に混ぜていません。
-              取得元、規約、運用負荷、データの安定性を確認できるまでは、画面上で無理に推定値へ混ぜない方針です。
+              現時点では、同時接続者数、トップセラー順位、公開プロフィールpolling、ウィッシュリスト、DLC/IAP売上、国別の実売上データは推定に混ぜていません。
+              まずはDBを使わないWebアプリとして提供するため、取得した同時接続者数や分析結果の履歴保存も行いません。
             </p>
             <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-slate-600">
               <li>レビュー倍率法は、レビューを書かない購入者の存在を前提にした近似です。</li>
