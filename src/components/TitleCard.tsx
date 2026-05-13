@@ -211,7 +211,7 @@ export default function TitleCard({ data, currency }: Props) {
         <div className="p-5">
           {tab === "overview" && (
             <div className="space-y-5">
-              <Panel title="Stats">
+              <Panel title="統計サマリー">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   <StatItem
                     label="Copies sold"

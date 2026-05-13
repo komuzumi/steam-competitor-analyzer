@@ -6,7 +6,6 @@ import InputForm from "@/components/InputForm";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import TitleCard from "@/components/TitleCard";
 import ComparisonTable from "@/components/ComparisonTable";
-import MarkdownExport from "@/components/MarkdownExport";
 import CurrencySelector from "@/components/CurrencySelector";
 import { GameAnalysis, SSEEvent } from "@/types";
 import { CurrencyCode } from "@/lib/currency";
@@ -186,8 +185,6 @@ export default function Home() {
             {results.map((result) => (
               <TitleCard key={result.appId} data={result} currency={currency} />
             ))}
-
-            {!isLoading && <MarkdownExport results={results} currency={currency} />}
           </div>
         )}
       </div>
