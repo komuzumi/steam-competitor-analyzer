@@ -62,6 +62,74 @@ function getCountryProxyStats(stats: LanguageStat[]): { label: string; percent: 
   ];
 }
 
+interface LanguageInsight {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "good" | "warn" | "neutral";
+}
+
+function getLanguageRate(stat: LanguageStat): number {
+  return stat.count > 0 ? (stat.positive / stat.count) * 100 : 0;
+}
+
+function getLanguageInsights(stats: LanguageStat[], totalReviews: number, globalPositiveRate: number): LanguageInsight[] {
+  const rows = stats
+    .filter((stat) => stat.language !== "other" && stat.count > 0)
+    .map((stat) => ({
+      ...stat,
+      rate: getLanguageRate(stat),
+      share: totalReviews > 0 ? (stat.count / totalReviews) * 100 : 0,
+      name: stat.displayName ?? stat.language,
+    }));
+
+  if (!rows.length) {
+    return [{ label: "言語別傾向", value: "データ不足", detail: "言語別レビュー集計を取得できませんでした。" }];
+  }
+
+  const significantThreshold = Math.max(100, totalReviews * 0.01);
+  const significantRows = rows.filter((row) => row.count >= significantThreshold);
+  const trendRows = significantRows.length ? significantRows : rows;
+  const primary = rows[0];
+  const highest = [...trendRows].sort((a, b) => b.rate - a.rate || b.count - a.count)[0];
+  const lowest = [...trendRows].sort((a, b) => a.rate - b.rate || b.count - a.count)[0];
+  const underperforming = trendRows
+    .filter((row) => row.rate <= globalPositiveRate - 5)
+    .sort((a, b) => a.rate - b.rate)
+    .slice(0, 3);
+  const top3Share = rows.slice(0, 3).reduce((sum, row) => sum + row.share, 0);
+
+  return [
+    {
+      label: "最大言語市場",
+      value: primary.name,
+      detail: `${formatShortNumber(primary.count)}件 / 構成比${formatPercent(primary.share)} / 好評率${formatPercent(primary.rate)}`,
+    },
+    {
+      label: "低評価リスク",
+      value: lowest.name,
+      detail: `${formatShortNumber(lowest.count)}件以上の言語で最低好評率: ${formatPercent(lowest.rate)}`,
+      tone: lowest.rate <= globalPositiveRate - 5 ? "warn" : "neutral",
+    },
+    {
+      label: "高評価が強い言語",
+      value: highest.name,
+      detail: `${formatShortNumber(highest.count)}件 / 好評率${formatPercent(highest.rate)}`,
+      tone: "good",
+    },
+    {
+      label: "優先確認候補",
+      value: underperforming.length ? underperforming.map((row) => row.name).join(" / ") : "大きな乖離なし",
+      detail: underperforming.length
+        ? `全体好評率より5pt以上低い言語: ${underperforming
+            .map((row) => `${row.name} ${formatPercent(row.rate)}`)
+            .join(", ")}`
+        : `上位3言語の構成比は${formatPercent(top3Share)}です。大きな低評価ギャップはありません。`,
+      tone: underperforming.length ? "warn" : "good",
+    },
+  ];
+}
+
 function formatRecentSalesNote(data: GameAnalysis): string {
   const estimate = data.recentSalesEstimate;
   if (!estimate) return "直近レビュー取得に失敗";
@@ -354,6 +422,11 @@ export default function TitleCard({ data, currency }: Props) {
 
           {tab === "reviews" && (
             <div className="space-y-5">
+              <LanguageTrendSummary
+                stats={data.languageStats}
+                totalReviews={data.totalReviews}
+                positiveRate={data.positiveRate}
+              />
               <LanguageChart stats={data.languageStats} />
               {data.languageStats.length > 0 && (
                 <Panel title="言語別レビュー詳細">
@@ -477,6 +550,41 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
       <h3 className="mb-3 font-semibold text-slate-900">{title}</h3>
       {children}
     </div>
+  );
+}
+
+function LanguageTrendSummary({
+  stats,
+  totalReviews,
+  positiveRate,
+}: {
+  stats: LanguageStat[];
+  totalReviews: number;
+  positiveRate: number;
+}) {
+  const insights = getLanguageInsights(stats, totalReviews, positiveRate);
+
+  return (
+    <Panel title="言語別傾向サマリー">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {insights.map((insight) => (
+          <div
+            key={insight.label}
+            className={`rounded-lg border p-3 ${
+              insight.tone === "good"
+                ? "border-emerald-100 bg-emerald-50"
+                : insight.tone === "warn"
+                  ? "border-amber-100 bg-amber-50"
+                  : "border-slate-100 bg-slate-50"
+            }`}
+          >
+            <p className="text-xs font-medium text-slate-500">{insight.label}</p>
+            <p className="mt-1 text-base font-bold text-slate-900">{insight.value}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">{insight.detail}</p>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }
 
