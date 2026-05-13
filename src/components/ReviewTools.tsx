@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AISummaryResult, GameAnalysis, PublicReview } from "@/types";
+import { AISampleMeta, AISummaryResult, GameAnalysis, PublicReview } from "@/types";
 
 type AiMode = "representative" | "full_compressed";
 
@@ -150,19 +150,136 @@ function SummarySection({ title, content }: { title: string; content: string }) 
   );
 }
 
+function buildPublicReviewSampleMeta({
+  reviews,
+  mode,
+  language,
+  languageLabel,
+}: {
+  reviews: PublicReview[];
+  mode: AiMode;
+  language: string;
+  languageLabel: string;
+}): AISampleMeta {
+  const positiveCount = reviews.filter((review) => review.voted_up).length;
+  const negativeCount = reviews.length - positiveCount;
+  const playtimes = reviews.map((review) => review.playtime_forever).filter((minutes) => minutes > 0);
+  const timestamps = reviews
+    .map((review) => review.timestamp_created)
+    .filter((timestamp) => Number.isFinite(timestamp) && timestamp > 0)
+    .sort((a, b) => a - b);
+  const languageCounts = new Map<string, number>();
+
+  for (const review of reviews) {
+    languageCounts.set(review.language, (languageCounts.get(review.language) ?? 0) + 1);
+  }
+
+  return {
+    mode,
+    language,
+    languageLabel,
+    reviewCount: reviews.length,
+    positiveCount,
+    negativeCount,
+    positiveRate: reviews.length > 0 ? (positiveCount / reviews.length) * 100 : 0,
+    averagePlaytimeHours:
+      playtimes.length > 0 ? playtimes.reduce((sum, minutes) => sum + minutes, 0) / playtimes.length / 60 : null,
+    oldestReviewDate:
+      timestamps.length > 0 ? new Date(timestamps[0] * 1000).toISOString().slice(0, 10) : null,
+    newestReviewDate:
+      timestamps.length > 0 ? new Date(timestamps[timestamps.length - 1] * 1000).toISOString().slice(0, 10) : null,
+    topLanguages: Array.from(languageCounts.entries())
+      .map(([reviewLanguage, count]) => ({ language: reviewLanguage, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5),
+    selectionRule:
+      mode === "representative"
+        ? "直近365日のレビューから、好評/不評を混ぜて最大200件を抽出。weighted_vote_score、参考票数、投稿日時を優先します。"
+        : "このページで一時取得した全文レビューを圧縮し、好評/不評/直近レビューを混ぜてAIに渡します。",
+  };
+}
+
+function AiSampleMetaPanel({ meta }: { meta: AISampleMeta }) {
+  const period =
+    meta.oldestReviewDate && meta.newestReviewDate ? `${meta.oldestReviewDate} - ${meta.newestReviewDate}` : "-";
+  const playtime = meta.averagePlaytimeHours == null ? "-" : `${meta.averagePlaytimeHours.toFixed(1)}h`;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-semibold text-slate-800">AI分析サンプル</p>
+          <p className="text-xs text-slate-500">{meta.selectionRule}</p>
+        </div>
+        <span className="w-fit rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+          {meta.mode === "representative" ? "代表200件" : "全文圧縮"}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <p className="text-xs text-slate-500">対象</p>
+          <p className="font-medium text-slate-800">{meta.languageLabel}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">サンプル数</p>
+          <p className="font-medium text-slate-800">{formatNumber(meta.reviewCount)}件</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">好評/不評</p>
+          <p className="font-medium text-slate-800">
+            {formatNumber(meta.positiveCount)} / {formatNumber(meta.negativeCount)} ({meta.positiveRate.toFixed(1)}%)
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">平均プレイ時間</p>
+          <p className="font-medium text-slate-800">{playtime}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">投稿期間</p>
+          <p className="font-medium text-slate-800">{period}</p>
+        </div>
+        <div className="sm:col-span-2 lg:col-span-3">
+          <p className="text-xs text-slate-500">言語内訳</p>
+          <p className="font-medium text-slate-800">
+            {meta.topLanguages.length > 0
+              ? meta.topLanguages
+                  .map((item) => `${item.language}: ${formatNumber(item.count)}件`)
+                  .join(" / ")
+              : "-"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildAiSummaryMarkdown({
   gameName,
   appId,
   languageLabel,
   aiMode,
   summary,
+  sampleMeta,
 }: {
   gameName: string;
   appId: string;
   languageLabel: string;
   aiMode: AiMode;
   summary: AISummaryResult;
+  sampleMeta?: AISampleMeta | null;
 }): string {
+  const sampleLines = sampleMeta
+    ? [
+        `- サンプル数: ${sampleMeta.reviewCount}`,
+        `- サンプル好評/不評: ${sampleMeta.positiveCount} / ${sampleMeta.negativeCount} (${sampleMeta.positiveRate.toFixed(1)}%)`,
+        `- サンプル投稿期間: ${sampleMeta.oldestReviewDate ?? "-"} - ${sampleMeta.newestReviewDate ?? "-"}`,
+        `- サンプル平均プレイ時間: ${
+          sampleMeta.averagePlaytimeHours == null ? "-" : `${sampleMeta.averagePlaytimeHours.toFixed(1)}h`
+        }`,
+        `- サンプル抽出ルール: ${sampleMeta.selectionRule}`,
+      ]
+    : [];
+
   return [
     `# AIレビュー分析レポート: ${gameName}`,
     "",
@@ -170,6 +287,7 @@ function buildAiSummaryMarkdown({
     `- 分析対象: ${languageLabel}`,
     `- AIモード: ${aiMode === "representative" ? "代表200件" : "全文圧縮"}`,
     `- 生成日時: ${new Date().toLocaleString("ja-JP")}`,
+    ...sampleLines,
     "",
     "## 高評価の理由",
     formatAiReportText(summary.positiveReasons),
@@ -266,6 +384,7 @@ export default function ReviewTools({ data }: Props) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [csvStatus, setCsvStatus] = useState<string>("");
   const [aiExportStatus, setAiExportStatus] = useState<string>("");
+  const [aiSampleMeta, setAiSampleMeta] = useState<AISampleMeta | null>(null);
   const inFlightFullFetch = useRef<Partial<Record<string, Promise<PublicReview[]>>>>({});
 
   useEffect(() => {
@@ -396,11 +515,13 @@ export default function ReviewTools({ data }: Props) {
     setAiElapsed(0);
     setAiStatus("");
     setAiExportStatus("");
+    setAiSampleMeta(null);
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
 
     try {
+      let localSampleMeta: AISampleMeta | null = null;
       let body: Record<string, unknown> = {
         appId: data.appId,
         gameName: data.name,
@@ -412,6 +533,12 @@ export default function ReviewTools({ data }: Props) {
       if (aiMode === "full_compressed") {
         setAiStatus(`${selectedLanguageLabel}の全文レビューを取得中...`);
         const reviews = await fetchFullReviews(selectedLanguage);
+        localSampleMeta = buildPublicReviewSampleMeta({
+          reviews,
+          mode: aiMode,
+          language: selectedLanguage,
+          languageLabel: selectedLanguageLabel,
+        });
         setAiStatus(`${selectedLanguageLabel}の全文レビューを圧縮してGeminiで分析中...`);
         body = {
           ...body,
@@ -432,6 +559,7 @@ export default function ReviewTools({ data }: Props) {
       if (!res.ok) throw new Error(payload.error || "AI分析に失敗しました");
 
       setAiSummary(payload.aiSummary as AISummaryResult);
+      setAiSampleMeta((payload.sampleMeta as AISampleMeta | undefined) ?? localSampleMeta);
       setAiStatus(
         aiMode === "representative"
           ? `${selectedLanguageLabel}の代表レビューで分析しました`
@@ -481,9 +609,10 @@ export default function ReviewTools({ data }: Props) {
     const markdown = buildAiSummaryMarkdown({
       gameName: data.name,
       appId: data.appId,
-      languageLabel: selectedLanguageLabel,
-      aiMode,
+      languageLabel: aiSampleMeta?.languageLabel ?? selectedLanguageLabel,
+      aiMode: aiSampleMeta?.mode ?? aiMode,
       summary: aiSummary,
+      sampleMeta: aiSampleMeta,
     });
 
     try {
@@ -499,13 +628,14 @@ export default function ReviewTools({ data }: Props) {
     const markdown = buildAiSummaryMarkdown({
       gameName: data.name,
       appId: data.appId,
-      languageLabel: selectedLanguageLabel,
-      aiMode,
+      languageLabel: aiSampleMeta?.languageLabel ?? selectedLanguageLabel,
+      aiMode: aiSampleMeta?.mode ?? aiMode,
       summary: aiSummary,
+      sampleMeta: aiSampleMeta,
     });
 
     downloadText(
-      `${data.appId}-${safeFilename(data.name)}-${selectedLanguage}-ai-report.md`,
+      `${data.appId}-${safeFilename(data.name)}-${aiSampleMeta?.language ?? selectedLanguage}-ai-report.md`,
       markdown,
       "text/markdown;charset=utf-8",
     );
@@ -663,6 +793,7 @@ export default function ReviewTools({ data }: Props) {
             </div>
           </div>
           <div className="space-y-3">
+            {aiSampleMeta && <AiSampleMetaPanel meta={aiSampleMeta} />}
             <SummarySection title="高評価の理由" content={aiSummary.positiveReasons} />
             <SummarySection title="低評価の理由" content={aiSummary.negativeReasons} />
             <SummarySection title="頻出する不満" content={aiSummary.frequentComplaints} />

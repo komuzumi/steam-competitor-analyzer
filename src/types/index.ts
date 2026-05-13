@@ -102,6 +102,21 @@ export interface AISummaryResult {
   globalExpansionNotes: string;
 }
 
+export interface AISampleMeta {
+  mode: "representative" | "full_compressed";
+  language: string;
+  languageLabel: string;
+  reviewCount: number;
+  positiveCount: number;
+  negativeCount: number;
+  positiveRate: number;
+  averagePlaytimeHours: number | null;
+  oldestReviewDate: string | null;
+  newestReviewDate: string | null;
+  topLanguages: { language: string; count: number }[];
+  selectionRule: string;
+}
+
 export interface CurrencyPriceInfo {
   basePrice: number;
   currentPrice: number;
