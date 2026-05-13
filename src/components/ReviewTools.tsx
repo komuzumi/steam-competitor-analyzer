@@ -200,7 +200,7 @@ function getPlaytimeBucket(minutes: number): string {
   return "100h+";
 }
 
-function PlaytimeSentimentChart({ reviews }: { reviews: PublicReview[] }) {
+function PlaytimeSentimentChart({ reviews, scopeLabel }: { reviews: PublicReview[]; scopeLabel: string }) {
   const buckets = useMemo(() => {
     const order = ["<1h", "1-5h", "5-10h", "10-20h", "20-50h", "50-100h", "100h+"];
     const map = new Map(order.map((bucket) => [bucket, { bucket, positive: 0, negative: 0, total: 0 }]));
@@ -221,7 +221,9 @@ function PlaytimeSentimentChart({ reviews }: { reviews: PublicReview[] }) {
     <div className="rounded-lg border border-slate-200 bg-white p-3">
       <div className="mb-3">
         <p className="text-sm font-semibold text-slate-800">プレイ時間別 好評/不評</p>
-        <p className="text-xs text-slate-500">全文レビュー取得後の一時データだけで集計します。</p>
+        <p className="text-xs text-slate-500">
+          {scopeLabel}の一時レビュー{formatNumber(reviews.length)}件だけで集計します。
+        </p>
       </div>
       <div className="space-y-2">
         {buckets.map((bucket) => {
@@ -294,6 +296,19 @@ export default function ReviewTools({ data }: Props) {
     languageOptions.find((option) => option.value === selectedLanguage)?.label ?? selectedLanguage;
   const allReviewCache = reviewCaches.all;
   const activeReviewCache = reviewCaches[selectedLanguage];
+  const visibleReviewCache = useMemo(() => {
+    if (activeReviewCache) return activeReviewCache;
+    if (selectedLanguage !== "all" && allReviewCache) {
+      return allReviewCache.filter((review) => review.language === selectedLanguage);
+    }
+    return allReviewCache;
+  }, [activeReviewCache, allReviewCache, selectedLanguage]);
+  const visibleReviewCacheLabel = selectedLanguage === "all" ? "全言語" : selectedLanguageLabel;
+  const cacheStatus = allReviewCache
+    ? `全言語 ${formatNumber(allReviewCache.length)}件`
+    : visibleReviewCache
+      ? `${visibleReviewCacheLabel} ${formatNumber(visibleReviewCache.length)}件`
+      : "未取得";
   const visibleAiStatus = isAnalyzing && aiStatus ? `${aiStatus}（${aiElapsed}秒経過）` : aiStatus;
 
   async function fetchFullReviews(language: string): Promise<PublicReview[]> {
@@ -369,6 +384,7 @@ export default function ReviewTools({ data }: Props) {
       return await promise;
     } finally {
       setIsFetchingReviews(false);
+      setFetchProgress(null);
       delete inFlightFullFetch.current[language];
     }
   }
@@ -497,7 +513,7 @@ export default function ReviewTools({ data }: Props) {
             <p className="text-xs text-slate-500">レビュー本文はDB保存せず、このページのメモリ内だけで一時保持します。</p>
           </div>
           <div className="text-xs text-slate-500">
-            全文キャッシュ: {allReviewCache ? `${formatNumber(allReviewCache.length)}件` : "未取得"}
+            全文キャッシュ: {cacheStatus}
           </div>
         </div>
 
@@ -575,11 +591,11 @@ export default function ReviewTools({ data }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => fetchFullReviews("all").catch((err) => setCsvStatus(err.message))}
+            onClick={() => fetchFullReviews(selectedLanguage).catch((err) => setCsvStatus(err.message))}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={isAnalyzing || isFetchingReviews}
           >
-            {isFetchingReviews ? "取得中..." : "全文レビュー取得"}
+            {isFetchingReviews ? "取得中..." : "選択対象の全文レビュー取得"}
           </button>
           <button
             type="button"
@@ -597,6 +613,11 @@ export default function ReviewTools({ data }: Props) {
               {selectedLanguageLabel}: {formatNumber(activeReviewCache.length)}件をページ内に一時保持中
             </p>
           )}
+          {!activeReviewCache && selectedLanguage !== "all" && visibleReviewCache && (
+            <p>
+              {selectedLanguageLabel}: 全言語キャッシュから{formatNumber(visibleReviewCache.length)}件を表示中
+            </p>
+          )}
           {fetchProgress && (
             <p>
               全文取得: {formatNumber(fetchProgress.fetched)} / {formatNumber(fetchProgress.total)}件
@@ -608,7 +629,9 @@ export default function ReviewTools({ data }: Props) {
         </div>
       </div>
 
-      {allReviewCache && <PlaytimeSentimentChart reviews={allReviewCache} />}
+      {visibleReviewCache && visibleReviewCache.length > 0 && (
+        <PlaytimeSentimentChart reviews={visibleReviewCache} scopeLabel={visibleReviewCacheLabel} />
+      )}
 
       {aiSummary && (
         <div>
