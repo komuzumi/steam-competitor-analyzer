@@ -74,6 +74,10 @@ function downloadFromUrl(url: string, filename: string) {
   link.remove();
 }
 
+function safeFilename(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, "_");
+}
+
 function reviewRank(review: PublicReview): number {
   return review.weighted_vote_score * 100_000 + review.votes_up + review.timestamp_created / 1_000_000;
 }
@@ -144,6 +148,45 @@ function SummarySection({ title, content }: { title: string; content: string }) 
       <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{formatAiReportText(content)}</p>
     </div>
   );
+}
+
+function buildAiSummaryMarkdown({
+  gameName,
+  appId,
+  languageLabel,
+  aiMode,
+  summary,
+}: {
+  gameName: string;
+  appId: string;
+  languageLabel: string;
+  aiMode: AiMode;
+  summary: AISummaryResult;
+}): string {
+  return [
+    `# AIレビュー分析レポート: ${gameName}`,
+    "",
+    `- AppID: ${appId}`,
+    `- 分析対象: ${languageLabel}`,
+    `- AIモード: ${aiMode === "representative" ? "代表200件" : "全文圧縮"}`,
+    `- 生成日時: ${new Date().toLocaleString("ja-JP")}`,
+    "",
+    "## 高評価の理由",
+    formatAiReportText(summary.positiveReasons),
+    "",
+    "## 低評価の理由",
+    formatAiReportText(summary.negativeReasons),
+    "",
+    "## 頻出する不満",
+    formatAiReportText(summary.frequentComplaints),
+    "",
+    "## 企画に活かせる示唆",
+    formatAiReportText(summary.planningInsights),
+    "",
+    "## 海外展開時の注意点",
+    formatAiReportText(summary.globalExpansionNotes),
+    "",
+  ].join("\n");
 }
 
 function getPlaytimeBucket(minutes: number): string {
@@ -220,6 +263,7 @@ export default function ReviewTools({ data }: Props) {
   const [isFetchingReviews, setIsFetchingReviews] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [csvStatus, setCsvStatus] = useState<string>("");
+  const [aiExportStatus, setAiExportStatus] = useState<string>("");
   const inFlightFullFetch = useRef<Partial<Record<string, Promise<PublicReview[]>>>>({});
 
   useEffect(() => {
@@ -333,6 +377,7 @@ export default function ReviewTools({ data }: Props) {
     setIsAnalyzing(true);
     setAiElapsed(0);
     setAiStatus("");
+    setAiExportStatus("");
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
@@ -393,18 +438,54 @@ export default function ReviewTools({ data }: Props) {
         const params = new URLSearchParams({ appId: data.appId, name: data.name });
         downloadFromUrl(
           `/api/reviews/csv?${params}`,
-          `${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`,
+          `${data.appId}-${safeFilename(data.name)}-reviews.csv`,
         );
         setCsvStatus("CSVダウンロードを開始しました。未取得の場合はサーバーから直接生成します。");
         return;
       }
 
       const csv = makeCsv(allReviewCache);
-      downloadText(`${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`, csv, "text/csv;charset=utf-8");
+      downloadText(`${data.appId}-${safeFilename(data.name)}-reviews.csv`, csv, "text/csv;charset=utf-8");
       setCsvStatus("ページ内の一時レビューからCSVを生成しました");
     } catch (err) {
       setCsvStatus(err instanceof Error ? err.message : "CSV生成に失敗しました");
     }
+  }
+
+  async function handleCopyAiReport() {
+    if (!aiSummary) return;
+    const markdown = buildAiSummaryMarkdown({
+      gameName: data.name,
+      appId: data.appId,
+      languageLabel: selectedLanguageLabel,
+      aiMode,
+      summary: aiSummary,
+    });
+
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setAiExportStatus("AIレポートをコピーしました");
+    } catch {
+      setAiExportStatus("クリップボードへのコピーに失敗しました");
+    }
+  }
+
+  function handleDownloadAiReport() {
+    if (!aiSummary) return;
+    const markdown = buildAiSummaryMarkdown({
+      gameName: data.name,
+      appId: data.appId,
+      languageLabel: selectedLanguageLabel,
+      aiMode,
+      summary: aiSummary,
+    });
+
+    downloadText(
+      `${data.appId}-${safeFilename(data.name)}-${selectedLanguage}-ai-report.md`,
+      markdown,
+      "text/markdown;charset=utf-8",
+    );
+    setAiExportStatus("AIレポートのMarkdown保存を開始しました");
   }
 
   return (
@@ -522,6 +603,7 @@ export default function ReviewTools({ data }: Props) {
             </p>
           )}
           {visibleAiStatus && <p className="text-blue-700">{visibleAiStatus}</p>}
+          {aiExportStatus && <p className="text-blue-700">{aiExportStatus}</p>}
           {csvStatus && <p className="text-blue-700">{csvStatus}</p>}
         </div>
       </div>
@@ -530,7 +612,25 @@ export default function ReviewTools({ data }: Props) {
 
       {aiSummary && (
         <div>
-          <h4 className="mb-2 font-semibold text-slate-900">AI分析レポート</h4>
+          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h4 className="font-semibold text-slate-900">AI分析レポート</h4>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleCopyAiReport}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                AIレポートをコピー
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadAiReport}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                Markdown保存
+              </button>
+            </div>
+          </div>
           <div className="space-y-3">
             <SummarySection title="高評価の理由" content={aiSummary.positiveReasons} />
             <SummarySection title="低評価の理由" content={aiSummary.negativeReasons} />
