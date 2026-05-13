@@ -304,11 +304,13 @@ export default function ReviewTools({ data }: Props) {
     return allReviewCache;
   }, [activeReviewCache, allReviewCache, selectedLanguage]);
   const visibleReviewCacheLabel = selectedLanguage === "all" ? "全言語" : selectedLanguageLabel;
-  const cacheStatus = allReviewCache
-    ? `全言語 ${formatNumber(allReviewCache.length)}件`
-    : visibleReviewCache
+  const cacheStatus =
+    selectedLanguage !== "all" && visibleReviewCache
       ? `${visibleReviewCacheLabel} ${formatNumber(visibleReviewCache.length)}件`
-      : "未取得";
+      : allReviewCache
+        ? `全言語 ${formatNumber(allReviewCache.length)}件`
+        : "未取得";
+  const reviewFilenameSuffix = selectedLanguage === "all" ? "reviews" : `${selectedLanguage}-reviews`;
   const visibleAiStatus = isAnalyzing && aiStatus ? `${aiStatus}（${aiElapsed}秒経過）` : aiStatus;
 
   async function fetchFullReviews(language: string): Promise<PublicReview[]> {
@@ -450,19 +452,25 @@ export default function ReviewTools({ data }: Props) {
   async function handleCsvDownload() {
     setCsvStatus("");
     try {
-      if (!allReviewCache) {
-        const params = new URLSearchParams({ appId: data.appId, name: data.name });
+      if (!visibleReviewCache) {
+        const params = new URLSearchParams({ appId: data.appId, name: data.name, language: selectedLanguage });
         downloadFromUrl(
           `/api/reviews/csv?${params}`,
-          `${data.appId}-${safeFilename(data.name)}-reviews.csv`,
+          `${data.appId}-${safeFilename(data.name)}-${reviewFilenameSuffix}.csv`,
         );
-        setCsvStatus("CSVダウンロードを開始しました。未取得の場合はサーバーから直接生成します。");
+        setCsvStatus(`${visibleReviewCacheLabel}のCSVダウンロードを開始しました。未取得のためサーバーから直接生成します。`);
         return;
       }
 
-      const csv = makeCsv(allReviewCache);
-      downloadText(`${data.appId}-${safeFilename(data.name)}-reviews.csv`, csv, "text/csv;charset=utf-8");
-      setCsvStatus("ページ内の一時レビューからCSVを生成しました");
+      const csv = makeCsv(visibleReviewCache);
+      downloadText(
+        `${data.appId}-${safeFilename(data.name)}-${reviewFilenameSuffix}.csv`,
+        csv,
+        "text/csv;charset=utf-8",
+      );
+      setCsvStatus(
+        `${visibleReviewCacheLabel}のページ内一時レビュー${formatNumber(visibleReviewCache.length)}件からCSVを生成しました`,
+      );
     } catch (err) {
       setCsvStatus(err instanceof Error ? err.message : "CSV生成に失敗しました");
     }
