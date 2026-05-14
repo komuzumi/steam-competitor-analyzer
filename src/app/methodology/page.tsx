@@ -112,14 +112,14 @@ export default function MethodologyPage() {
           <h1 className="mt-2 text-3xl font-bold text-slate-950">販売本数・売上推定ロジック</h1>
           <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">
             このページでは、本アプリがSteam公開情報から「推定所有者」「推定Steam販売本数」「総売上」「Steam手数料控除後売上」をどう計算しているかを説明します。
-            数値はSteamやGamalyticの公式値ではなく、公開レビューを中心にした独自推定です。実売上の保証値ではなく、市場規模や競合比較のための目安として扱います。
+            数値はSteamの公式値ではなく、公開レビューを中心にした独自推定です。実売上の保証値ではなく、市場規模や競合比較のための目安として扱います。
           </p>
         </div>
 
         <div className="mt-8 space-y-10 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <Section title="1. 使うデータ">
             <p className="text-sm leading-7 text-slate-600">
-              初回分析ではレビュー本文を取得せず、Steam公開APIなどから取れる軽量データを使います。主に使うのは、総レビュー数、Steam購入レビュー数、発売年、USD基準価格、表示通貨の定価、好評率、レビュー投稿者サンプルの平均プレイ時間です。
+              Steam公開APIなどから取れるデータを使います。主に使うのは、総レビュー数、Steam購入レビュー数、発売年、USD基準価格、表示通貨の定価、好評率、レビュー投稿者サンプルの平均プレイ時間です。
               現在同時接続者数は画面上の参考情報として表示しますが、DBには保存せず、売上推定にも混ぜません。
             </p>
             <div className="grid gap-3 md:grid-cols-2">
@@ -230,12 +230,7 @@ export default function MethodologyPage() {
           </Section>
 
           <Section title="8. 使っていないデータと注意点">
-            <p className="text-sm leading-7 text-slate-600">
-              現時点では、同時接続者数、トップセラー順位、公開プロフィールpolling、ウィッシュリスト、DLC/IAP売上、国別の実売上データは推定に混ぜていません。
-              まずはDBを使わないWebアプリとして提供するため、取得した同時接続者数や分析結果の履歴保存も行いません。
-            </p>
             <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-slate-600">
-              <li>レビュー倍率法は、レビューを書かない購入者の存在を前提にした近似です。</li>
               <li>キー配布、無料配布、バンドル、外部ストア販売が多いタイトルでは、所有者とSteam販売本数の差が大きくなります。</li>
               <li>無料ゲームのベースゲーム売上は原則Low扱いです。IAPやDLC売上は今回の推定対象外です。</li>
               <li>定価と実売価格の差は有効販売価格係数で簡略化しています。地域別売上や返金は反映していません。</li>
