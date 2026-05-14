@@ -211,17 +211,17 @@ export default function MethodologyPage() {
           <Section title="7. 信頼度の見方">
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-lg bg-green-50 p-4">
-                <p className="font-semibold text-green-800">High</p>
+                <p className="font-semibold text-green-800">高</p>
                 <p className="mt-1 text-sm leading-6 text-green-900">
                   有料ゲーム、レビュー1万件以上、Steam購入レビュー比率が取得できている場合。
                 </p>
               </div>
               <div className="rounded-lg bg-yellow-50 p-4">
-                <p className="font-semibold text-yellow-800">Medium</p>
-                <p className="mt-1 text-sm leading-6 text-yellow-900">レビュー1,000件以上だが、High条件までは満たさない場合。</p>
+                <p className="font-semibold text-yellow-800">中</p>
+                <p className="mt-1 text-sm leading-6 text-yellow-900">レビュー1,000件以上だが、「高」の条件までは満たさない場合。</p>
               </div>
               <div className="rounded-lg bg-red-50 p-4">
-                <p className="font-semibold text-red-800">Low</p>
+                <p className="font-semibold text-red-800">低</p>
                 <p className="mt-1 text-sm leading-6 text-red-900">
                   レビュー1,000件未満、無料ゲーム、価格不明など、推定のブレが大きい場合。
                 </p>
@@ -232,7 +232,7 @@ export default function MethodologyPage() {
           <Section title="8. 使っていないデータと注意点">
             <ul className="list-disc space-y-2 pl-5 text-sm leading-7 text-slate-600">
               <li>キー配布、無料配布、バンドル、外部ストア販売が多いタイトルでは、所有者とSteam販売本数の差が大きくなります。</li>
-              <li>無料ゲームのベースゲーム売上は原則Low扱いです。IAPやDLC売上は今回の推定対象外です。</li>
+              <li>無料ゲームのベースゲーム売上は原則「低」扱いです。IAPやDLC売上は今回の推定対象外です。</li>
               <li>定価と実売価格の差は有効販売価格係数で簡略化しています。地域別売上や返金は反映していません。</li>
             </ul>
           </Section>

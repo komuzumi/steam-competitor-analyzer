@@ -126,7 +126,7 @@ export function estimateSteamMarket(input: SteamMarketEstimateInput): SteamMarke
     "トップセラー順位と公開プロフィール推定は、取得元と運用ルールが固まるまで重み0の予約メソッドです。",
   ];
   if (input.isFree) {
-    notes.push("無料ゲームのベースゲーム売上は推定信頼度をLowにしています。IAP/DLC売上は今回の対象外です。");
+    notes.push("無料ゲームのベースゲーム売上は推定信頼度を「低」にしています。IAP/DLC売上は今回の対象外です。");
   }
 
   return {

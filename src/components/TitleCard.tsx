@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { GameAnalysis, LanguageStat, SalesEstimate } from "@/types";
 import { CurrencyCode, formatPrice } from "@/lib/currency";
 import { estimateNetRevenue, estimateRevenue } from "@/lib/sales";
+import { formatConfidenceLabel } from "@/lib/labels";
 import LanguageChart from "@/components/LanguageChart";
 import ReviewTools from "@/components/ReviewTools";
 
@@ -180,7 +181,11 @@ export default function TitleCard({ data, currency }: Props) {
             <Metric label="レビュー数" value={formatNumber(data.totalReviews)} />
             <Metric label="好評率" value={formatPercent(data.positiveRate)} color="text-green-600" />
             <Metric label="現在同時接続者" value={data.currentPlayers == null ? "取得不可" : formatNumber(data.currentPlayers)} />
-            <Metric label="推定信頼度" value={data.marketEstimate.confidence} color={confidenceColor(data.marketEstimate.confidence)} />
+            <Metric
+              label="推定信頼度"
+              value={formatConfidenceLabel(data.marketEstimate.confidence)}
+              color={confidenceColor(data.marketEstimate.confidence)}
+            />
           </div>
         </div>
       </div>
@@ -402,7 +407,7 @@ export default function TitleCard({ data, currency }: Props) {
                     label="Steam購入レビュー比率"
                     value={`${(data.marketEstimate.explanation.steamPurchaseReviewShare * 100).toFixed(1)}%`}
                   />
-                  <LogicRow label="信頼度" value={data.marketEstimate.confidence} />
+                  <LogicRow label="信頼度" value={formatConfidenceLabel(data.marketEstimate.confidence)} />
                 </div>
                 <div className="mt-4 rounded-lg bg-slate-50 p-3">
                   <p className="text-xs font-semibold text-slate-700">使用データ</p>

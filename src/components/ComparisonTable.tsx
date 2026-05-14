@@ -3,6 +3,7 @@
 import { GameAnalysis } from "@/types";
 import { formatPrice, CurrencyCode } from "@/lib/currency";
 import { estimateNetRevenue, estimateRevenue } from "@/lib/sales";
+import { formatConfidenceLabel } from "@/lib/labels";
 
 function formatNumber(n: number): string {
   return Math.round(n).toLocaleString("ja-JP");
@@ -58,7 +59,7 @@ export default function ComparisonTable({ results, currency }: Props) {
             values={results.map((r) => fp(estimateNetRevenue(estimateRevenue(r.salesEstimate, r.prices[currency]?.basePrice ?? 0)).standard))}
             highlight
           />
-          <Row label="推定信頼度" values={results.map((r) => r.marketEstimate.confidence)} />
+          <Row label="推定信頼度" values={results.map((r) => formatConfidenceLabel(r.marketEstimate.confidence))} />
         </tbody>
       </table>
     </div>
