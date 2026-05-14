@@ -214,19 +214,19 @@ export default function TitleCard({ data, currency }: Props) {
               <Panel title="統計サマリー">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   <StatItem
-                    label="Copies sold"
+                    label="推定Steam販売本数"
                     value={formatEstimateRange(data.salesEstimate)}
                     note="Steam直接販売本数の推定"
                     help="Steam購入レビュー数とレビュー倍率から推定した、Steamストア上で販売された本数です。括弧内は保守・強気の推定レンジです。キー配布やバンドル由来の所有者は別枠として扱います。"
                   />
                   <StatItem
-                    label="Gross revenue (base game)"
+                    label="推定総売上（ベースゲーム）"
                     value={formatCurrencyRange(grossRevenue, fp)}
                     note="ベースゲーム売上、Steam手数料控除前"
                     help="推定Steam販売本数にベースゲーム定価と有効販売価格係数を掛けた売上です。セールや地域価格の影響を考慮するため、標準ケースでは定価の60%で計算しています。"
                   />
                   <StatItem
-                    label="Owners"
+                    label="推定所有者"
                     value={formatEstimateRangeFromCases(
                       data.marketEstimate.standard.ownersEstimate,
                       data.marketEstimate.conservative.ownersEstimate,
@@ -236,13 +236,13 @@ export default function TitleCard({ data, currency }: Props) {
                     help="総レビュー数に、発売年・価格帯・好評率・平均プレイ時間で補正したレビュー倍率を掛けた推定所有者数です。実プレイ人数の公開データはないため、プレイヤー総数の近似としても扱います。厳密なユニークプレイヤー数ではありません。"
                   />
                   <StatItem
-                    label="Average playtime"
+                    label="平均プレイ時間"
                     value={averagePlaytimeHours == null ? "取得不可" : `${averagePlaytimeHours.toFixed(1)}h`}
                     note="レビュー投稿者サンプルから算出"
                     help="SteamレビューAPIから取得したレビュー投稿者サンプルの総プレイ時間平均です。全ユーザー平均ではありませんが、レビュー倍率補正の参考値として使います。"
                   />
                   <StatItem
-                    label="Copies sold in the last 7 days"
+                    label="直近7日の推定販売本数"
                     value={
                       data.recentSalesEstimate
                         ? `${data.recentSalesEstimate.isReviewCountCapped ? ">= " : ""}${formatEstimateRange(
@@ -258,7 +258,7 @@ export default function TitleCard({ data, currency }: Props) {
                 <div className="mt-5 rounded-lg bg-slate-50 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-semibold text-slate-800">Players by country</p>
+                      <p className="text-sm font-semibold text-slate-800">国別プレイヤー比率（推定）</p>
                       <HelpTooltip text="Steamから国別プレイヤーの実測値は取得できないため、レビュー言語を国・地域の簡易プロキシとして表示しています。USは英語、CNは簡体字/繁体字中国語、RUはロシア語レビューを近似として扱います。" />
                     </div>
                     <p className="text-xs text-slate-500">レビュー言語ベースの簡易プロキシ</p>
