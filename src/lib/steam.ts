@@ -93,6 +93,13 @@ export interface SteamAppDetails {
   };
   is_free: boolean;
   package_groups?: PackageGroup[];
+  genres?: { id: string; description: string }[];
+  categories?: { id: number; description: string }[];
+  developers?: string[];
+  publishers?: string[];
+  recommendations?: {
+    total?: number;
+  };
 }
 
 function cleanPackageName(optionText: string): string {
@@ -204,6 +211,52 @@ export async function fetchAppDetails(appId: string, cc: string = "jp"): Promise
   }
 
   return appData.data;
+}
+
+function decodeHtmlEntity(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function fetchSteamTags(appId: string): Promise<string[]> {
+  const res = await fetchWithTimeout(`https://store.steampowered.com/app/${appId}/?l=english`, {
+    next: { revalidate: 3600 },
+    headers: {
+      cookie: "birthtime=568022401; mature_content=1",
+    },
+  });
+  if (!res.ok) return [];
+
+  const html = await res.text();
+  const tags = [...html.matchAll(/<a[^>]*class="[^"]*\bapp_tag\b[^"]*"[^>]*>([\s\S]*?)<\/a>/gi)]
+    .map((match) => decodeHtmlEntity(match[1].replace(/<[^>]*>/g, "")))
+    .filter(Boolean);
+
+  return Array.from(new Set(tags)).slice(0, 24);
+}
+
+export async function fetchSteamMoreLikeAppIds(appId: string): Promise<string[]> {
+  const res = await fetchWithTimeout(`https://store.steampowered.com/recommended/morelike/app/${appId}/?l=english`, {
+    next: { revalidate: 3600 },
+  });
+  if (!res.ok) return [];
+
+  const html = await res.text();
+  const ids = new Set<string>();
+  for (const match of html.matchAll(/data-ds-appid="(\d+)"/g)) {
+    if (match[1] !== appId) ids.add(match[1]);
+  }
+  for (const match of html.matchAll(/\/app\/(\d+)\//g)) {
+    if (match[1] !== appId) ids.add(match[1]);
+  }
+
+  return Array.from(ids).slice(0, 40);
 }
 
 export interface ReviewSummary {

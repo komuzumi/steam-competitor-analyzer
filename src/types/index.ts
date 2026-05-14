@@ -155,6 +155,44 @@ export interface GameAnalysis {
   aiSummary?: AISummaryResult;
 }
 
+export interface AudienceOverlapGame {
+  appId: string;
+  name: string;
+  headerImage: string;
+  releaseDate: string;
+  price: number;
+  currency: string;
+  estimatedCopiesSold: number;
+  estimatedGrossRevenue: number;
+  genres: string[];
+  tags: string[];
+  hybridScore: number;
+  reviewOverlapPercent: number;
+  reviewOverlapJaccard: number;
+  sharedReviewers: number;
+  targetReviewerSampleSize: number;
+  candidateReviewerSampleSize: number;
+  tagSimilarity: number;
+  genreSimilarity: number;
+  categorySimilarity: number;
+  reasons: string[];
+}
+
+export interface AudienceOverlapResponse {
+  appId: string;
+  generatedAt: string;
+  sourceNote: string;
+  target: {
+    appId: string;
+    name: string;
+    genres: string[];
+    tags: string[];
+    reviewerSampleSize: number;
+  };
+  alsoPlayed: AudienceOverlapGame[];
+  reviewerOverlap: AudienceOverlapGame[];
+}
+
 export interface PublicReview {
   recommendationid: string;
   language: string;

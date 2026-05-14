@@ -8,6 +8,7 @@ import { estimateNetRevenue, estimateRevenue } from "@/lib/sales";
 import { formatConfidenceLabel } from "@/lib/labels";
 import LanguageChart from "@/components/LanguageChart";
 import ReviewTools from "@/components/ReviewTools";
+import AudienceOverlapPanel from "@/components/AudienceOverlapPanel";
 
 function formatNumber(n: number): string {
   return Math.round(n).toLocaleString("ja-JP");
@@ -147,7 +148,7 @@ interface Props {
   currency: CurrencyCode;
 }
 
-type Tab = "overview" | "estimate" | "reviews" | "ai";
+type Tab = "overview" | "estimate" | "reviews" | "audience" | "ai";
 
 export default function TitleCard({ data, currency }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
@@ -196,6 +197,7 @@ export default function TitleCard({ data, currency }: Props) {
             ["overview", "概要"],
             ["estimate", "売上推定"],
             ["reviews", "レビュー/言語"],
+            ["audience", "類似タイトル"],
             ["ai", "AI/CSV"],
           ].map(([key, label]) => (
             <button
@@ -468,6 +470,7 @@ export default function TitleCard({ data, currency }: Props) {
           )}
 
           {tab === "ai" && <ReviewTools data={data} />}
+          {tab === "audience" && <AudienceOverlapPanel appId={data.appId} currency={currency} />}
         </div>
       </div>
     </section>
