@@ -398,7 +398,6 @@ function CompetitiveComparisonTable({ rows, currency }: { rows: AudienceOverlapG
                 </td>
                 <td className="px-3 py-3">
                   <ClassificationPill row={row} />
-                  <p className="mt-1 max-w-48 text-xs leading-5 text-slate-500">{row.classificationReason}</p>
                 </td>
                 <td className="px-3 py-3 text-right text-slate-700">
                   <ReviewerOverlapCell row={row} />

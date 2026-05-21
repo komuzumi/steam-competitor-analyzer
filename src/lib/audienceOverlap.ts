@@ -295,10 +295,18 @@ function getClassification(input: {
     };
   }
 
+  if (input.sharedReviewers > 0) {
+    return {
+      classification: "fanbase_neighbor",
+      label: "ファン層近接",
+      reason: "同じ投稿者の重なりがあり、ユーザー関心が近い可能性があります。",
+    };
+  }
+
   return {
-    classification: "fanbase_neighbor",
-    label: "ファン層近接",
-    reason: "メタ情報よりも、レビュー投稿者の重なりを優先して拾った候補です。",
+    classification: "adjacent_genre",
+    label: "近接ジャンル",
+    reason: "Steamの関連候補や公開メタ情報から拾った候補です。投稿者一致は検出されていません。",
   };
 }
 
