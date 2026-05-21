@@ -100,6 +100,26 @@ export interface AISummaryResult {
   frequentComplaints: string;
   planningInsights: string;
   globalExpansionNotes: string;
+  issueCategories: AIReviewIssueCategory[];
+}
+
+export type ReviewIssueCategory =
+  | "bugs_stability"
+  | "controls"
+  | "price_volume"
+  | "difficulty"
+  | "multiplayer_online"
+  | "localization"
+  | "content_shortage"
+  | "other";
+
+export interface AIReviewIssueCategory {
+  category: ReviewIssueCategory;
+  label: string;
+  severity: "high" | "medium" | "low";
+  mentions: number;
+  summary: string;
+  opportunity: string;
 }
 
 export interface AISampleMeta {
@@ -159,9 +179,21 @@ export interface AudienceOverlapGame {
   appId: string;
   name: string;
   headerImage: string;
+  classification: AudienceClassification;
+  classificationLabel: string;
+  classificationReason: string;
   releaseDate: string;
   price: number;
   currency: string;
+  totalReviews: number;
+  positiveRate: number;
+  steamPurchaseReviews: number;
+  averagePlaytimeHours: number | null;
+  currentPlayers: number | null;
+  recentReviewActivity7d: RecentReviewActivity;
+  momentumScore: number;
+  momentumLabel: string;
+  momentumReasons: string[];
   estimatedCopiesSold: number;
   estimatedGrossRevenue: number;
   genres: string[];
@@ -176,6 +208,21 @@ export interface AudienceOverlapGame {
   genreSimilarity: number;
   categorySimilarity: number;
   reasons: string[];
+  estimateDiagnostics: string[];
+}
+
+export type AudienceClassification =
+  | "target"
+  | "direct_competitor"
+  | "adjacent_genre"
+  | "surprising_link"
+  | "fanbase_neighbor";
+
+export interface RecentReviewActivity {
+  days: number;
+  reviewCount: number;
+  isCapped: boolean;
+  reviewShareOfTotal: number;
 }
 
 export interface AudienceOverlapResponse {
@@ -189,9 +236,11 @@ export interface AudienceOverlapResponse {
     tags: string[];
     reviewerSampleSize: number;
   };
+  targetGame: AudienceOverlapGame;
   alsoPlayed: AudienceOverlapGame[];
   reviewerOverlap: AudienceOverlapGame[];
   surprisingOverlap: AudienceOverlapGame[];
+  competitors: AudienceOverlapGame[];
 }
 
 export interface PublicReview {

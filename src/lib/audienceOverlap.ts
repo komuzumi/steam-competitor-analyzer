@@ -1,9 +1,16 @@
-import { AudienceOverlapGame, AudienceOverlapResponse } from "@/types";
+import {
+  AudienceClassification,
+  AudienceOverlapGame,
+  AudienceOverlapResponse,
+  RecentReviewActivity,
+} from "@/types";
 import { CurrencyCode, getCurrencyOption } from "@/lib/currency";
 import { estimateSteamMarket } from "@/lib/sales";
 import {
   extractEditionPrices,
   fetchAppDetails,
+  fetchCurrentPlayers,
+  fetchRecentSteamPurchaseReviewCount,
   fetchReviewPlaytimeSample,
   fetchReviews,
   fetchReviewSummary,
@@ -249,6 +256,98 @@ function getReviewSurpriseScore(candidate: AudienceOverlapGame): number {
   return candidate.reviewOverlapPercent * Math.max(100 - candidate.tagSimilarity, 0);
 }
 
+function getClassification(input: {
+  sharedReviewers: number;
+  reviewOverlapPercent: number;
+  tagSimilarity: number;
+  genreSimilarity: number;
+  categorySimilarity: number;
+}): { classification: AudienceClassification; label: string; reason: string } {
+  if (input.tagSimilarity >= 40 && input.genreSimilarity >= 70) {
+    return {
+      classification: "direct_competitor",
+      label: "直接競合",
+      reason: "タグとジャンルが近く、同じ棚で比較されやすい候補です。",
+    };
+  }
+
+  if (input.sharedReviewers > 0 && input.tagSimilarity < 35) {
+    return {
+      classification: "surprising_link",
+      label: "意外な関連",
+      reason: "タグは離れていますが、同じ投稿者がレビューしている候補です。",
+    };
+  }
+
+  if (input.sharedReviewers > 0 && input.reviewOverlapPercent >= 0.2) {
+    return {
+      classification: "fanbase_neighbor",
+      label: "ファン層近接",
+      reason: "同じ投稿者の重なりがあり、ユーザー関心が近い可能性があります。",
+    };
+  }
+
+  if (input.genreSimilarity >= 50 || input.tagSimilarity >= 20 || input.categorySimilarity >= 35) {
+    return {
+      classification: "adjacent_genre",
+      label: "近接ジャンル",
+      reason: "タグやカテゴリが部分的に近く、比較対象に入りやすい候補です。",
+    };
+  }
+
+  return {
+    classification: "fanbase_neighbor",
+    label: "ファン層近接",
+    reason: "メタ情報よりも、レビュー投稿者の重なりを優先して拾った候補です。",
+  };
+}
+
+function getMomentum(
+  recentReviewActivity7d: RecentReviewActivity,
+  currentPlayers: number | null,
+): { score: number; label: string; reasons: string[] } {
+  const reviewCountScore = Math.min(Math.log10(recentReviewActivity7d.reviewCount + 1) * 18, 45);
+  const shareScore = Math.min(recentReviewActivity7d.reviewShareOfTotal * 12, 35);
+  const ccuScore = currentPlayers == null ? 0 : Math.min(Math.log10(currentPlayers + 1) * 5, 20);
+  const score = Math.round(clamp(reviewCountScore + shareScore + ccuScore, 0, 100));
+  const label = score >= 70 ? "急伸" : score >= 45 ? "堅調" : score >= 20 ? "微増" : "静か";
+  const reasons = [
+    `直近${recentReviewActivity7d.days}日レビュー: ${recentReviewActivity7d.isCapped ? ">= " : ""}${recentReviewActivity7d.reviewCount.toLocaleString("ja-JP")}件`,
+    `総レビュー比: ${recentReviewActivity7d.reviewShareOfTotal.toFixed(2)}%`,
+  ];
+  if (currentPlayers != null) reasons.push(`現在同接: ${currentPlayers.toLocaleString("ja-JP")}人`);
+  if (recentReviewActivity7d.isCapped) reasons.push("取得上限到達のため下限評価");
+  return { score, label, reasons };
+}
+
+function getEstimateDiagnostics(input: {
+  totalReviews: number;
+  steamPurchaseReviews: number;
+  price: number;
+  averagePlaytimeHours: number | null;
+  recentReviewActivity7d: RecentReviewActivity;
+}): string[] {
+  const diagnostics: string[] = [];
+
+  if (input.totalReviews >= 10_000) diagnostics.push("レビュー数が多く、推定は比較的安定");
+  else if (input.totalReviews >= 1_000) diagnostics.push("レビュー数は中規模で、推定は標準的");
+  else diagnostics.push("レビュー数が少なく、推定のブレが大きい");
+
+  if (input.price <= 0) diagnostics.push("無料/価格不明のため売上推定は弱め");
+
+  if (input.totalReviews > 0 && input.steamPurchaseReviews > 0) {
+    const steamShare = input.steamPurchaseReviews / input.totalReviews;
+    if (steamShare < 0.5) diagnostics.push("Steam購入レビュー比率が低く、キー配布/バンドル影響の可能性");
+  } else {
+    diagnostics.push("Steam購入レビュー比率を十分に確認できない");
+  }
+
+  if (input.averagePlaytimeHours == null) diagnostics.push("平均プレイ時間サンプル不足");
+  if (input.recentReviewActivity7d.isCapped) diagnostics.push("直近レビュー取得が上限到達のため勢いは下限表示");
+
+  return diagnostics.slice(0, 4);
+}
+
 function selectSurprisingOverlap(candidates: AudienceOverlapGame[]): AudienceOverlapGame[] {
   const strict = candidates
     .filter((candidate) => candidate.sharedReviewers > 0 && candidate.tagSimilarity < 55)
@@ -278,12 +377,24 @@ async function enrichCandidate(
   },
 ): Promise<AudienceOverlapGame | null> {
   try {
-    const [candidateReviewers, reviewSummary, steamPurchaseReviews, averagePlaytimeHours, usdDetails] = await Promise.all([
+    const [
+      candidateReviewers,
+      reviewSummary,
+      steamPurchaseReviews,
+      averagePlaytimeHours,
+      usdDetails,
+      currentPlayers,
+      recentSteamPurchaseReviews7d,
+    ] = await Promise.all([
       fetchReviewAuthorSample(candidate.appId, 400).catch(() => new Set<string>()),
       fetchReviewSummary(candidate.appId).catch(() => ({ totalReviews: 0, totalPositive: 0, totalNegative: 0 })),
       fetchSteamPurchaseReviewCount(candidate.appId).catch(() => 0),
       fetchReviewPlaytimeSample(candidate.appId).catch(() => null),
-      options.currency === "USD" ? Promise.resolve(candidate.details) : fetchAppDetails(candidate.appId, "us").catch(() => candidate.details),
+      options.currency === "USD"
+        ? Promise.resolve(candidate.details)
+        : fetchAppDetails(candidate.appId, "us").catch(() => candidate.details),
+      fetchCurrentPlayers(candidate.appId).catch(() => null),
+      fetchRecentSteamPurchaseReviewCount(candidate.appId, 7, 300).catch(() => null),
     ]);
 
     const sharedReviewers = countSharedReviewers(options.targetReviewers, candidateReviewers);
@@ -302,6 +413,13 @@ async function enrichCandidate(
     const releaseYear = parseReleaseYear(releaseDate);
     const positiveRate =
       reviewSummary.totalReviews > 0 ? (reviewSummary.totalPositive / reviewSummary.totalReviews) * 100 : 0;
+    const recentReviewActivity7d: RecentReviewActivity = {
+      days: 7,
+      reviewCount: recentSteamPurchaseReviews7d?.count ?? 0,
+      isCapped: recentSteamPurchaseReviews7d?.isCapped ?? false,
+      reviewShareOfTotal:
+        reviewSummary.totalReviews > 0 ? ((recentSteamPurchaseReviews7d?.count ?? 0) / reviewSummary.totalReviews) * 100 : 0,
+    };
     const displayPrice = getBasePrice(candidate.details);
     const usdPrice = getBasePrice(usdDetails);
     const marketEstimate = estimateSteamMarket({
@@ -327,14 +445,34 @@ async function enrichCandidate(
     const commonTags = intersectLabels(options.targetTags, candidate.tags);
     const commonGenres = intersectLabels(options.targetGenres, candidate.genres);
     const commonCategories = intersectLabels(options.targetCategories, candidate.categories, 3);
+    const classification = getClassification({
+      sharedReviewers,
+      reviewOverlapPercent,
+      tagSimilarity,
+      genreSimilarity,
+      categorySimilarity,
+    });
+    const momentum = getMomentum(recentReviewActivity7d, currentPlayers);
 
     return {
       appId: candidate.appId,
       name: candidate.details.name,
       headerImage: candidate.details.header_image,
+      classification: classification.classification,
+      classificationLabel: classification.label,
+      classificationReason: classification.reason,
       releaseDate,
       price: displayPrice,
       currency: options.currency,
+      totalReviews: reviewSummary.totalReviews,
+      positiveRate,
+      steamPurchaseReviews,
+      averagePlaytimeHours,
+      currentPlayers,
+      recentReviewActivity7d,
+      momentumScore: momentum.score,
+      momentumLabel: momentum.label,
+      momentumReasons: momentum.reasons,
       estimatedCopiesSold: marketEstimate.standard.steamCopiesSoldEstimate,
       estimatedGrossRevenue: marketEstimate.standard.grossRevenueEstimate,
       genres: candidate.genres,
@@ -349,10 +487,101 @@ async function enrichCandidate(
       genreSimilarity: Math.round(genreSimilarity * 10) / 10,
       categorySimilarity: Math.round(categorySimilarity * 10) / 10,
       reasons: buildReasons({ sharedReviewers, commonTags, commonGenres, commonCategories }),
+      estimateDiagnostics: getEstimateDiagnostics({
+        totalReviews: reviewSummary.totalReviews,
+        steamPurchaseReviews,
+        price: displayPrice,
+        averagePlaytimeHours,
+        recentReviewActivity7d,
+      }),
     };
   } catch {
     return null;
   }
+}
+
+async function buildTargetGame(options: {
+  appId: string;
+  currency: CurrencyCode;
+  details: SteamAppDetails;
+  genres: string[];
+  categories: string[];
+  tags: string[];
+  targetReviewers: Set<string>;
+}): Promise<AudienceOverlapGame> {
+  const [reviewSummary, steamPurchaseReviews, averagePlaytimeHours, usdDetails, currentPlayers, recentSteamPurchaseReviews7d] =
+    await Promise.all([
+      fetchReviewSummary(options.appId).catch(() => ({ totalReviews: 0, totalPositive: 0, totalNegative: 0 })),
+      fetchSteamPurchaseReviewCount(options.appId).catch(() => 0),
+      fetchReviewPlaytimeSample(options.appId).catch(() => null),
+      options.currency === "USD" ? Promise.resolve(options.details) : fetchAppDetails(options.appId, "us").catch(() => options.details),
+      fetchCurrentPlayers(options.appId).catch(() => null),
+      fetchRecentSteamPurchaseReviewCount(options.appId, 7, 300).catch(() => null),
+    ]);
+  const releaseDate = options.details.release_date?.date || "Unknown";
+  const positiveRate =
+    reviewSummary.totalReviews > 0 ? (reviewSummary.totalPositive / reviewSummary.totalReviews) * 100 : 0;
+  const recentReviewActivity7d: RecentReviewActivity = {
+    days: 7,
+    reviewCount: recentSteamPurchaseReviews7d?.count ?? 0,
+    isCapped: recentSteamPurchaseReviews7d?.isCapped ?? false,
+    reviewShareOfTotal:
+      reviewSummary.totalReviews > 0 ? ((recentSteamPurchaseReviews7d?.count ?? 0) / reviewSummary.totalReviews) * 100 : 0,
+  };
+  const price = getBasePrice(options.details);
+  const marketEstimate = estimateSteamMarket({
+    totalReviews: reviewSummary.totalReviews,
+    steamPurchaseReviews,
+    releaseYear: parseReleaseYear(releaseDate),
+    priceForMultiplier: getBasePrice(usdDetails),
+    basePriceForRevenue: price,
+    positiveRate,
+    averagePlaytimeHours,
+    isFree: options.details.is_free,
+  });
+  const momentum = getMomentum(recentReviewActivity7d, currentPlayers);
+
+  return {
+    appId: options.appId,
+    name: options.details.name,
+    headerImage: options.details.header_image,
+    classification: "target",
+    classificationLabel: "対象",
+    classificationReason: "分析対象タイトルです。",
+    releaseDate,
+    price,
+    currency: options.currency,
+    totalReviews: reviewSummary.totalReviews,
+    positiveRate,
+    steamPurchaseReviews,
+    averagePlaytimeHours,
+    currentPlayers,
+    recentReviewActivity7d,
+    momentumScore: momentum.score,
+    momentumLabel: momentum.label,
+    momentumReasons: momentum.reasons,
+    estimatedCopiesSold: marketEstimate.standard.steamCopiesSoldEstimate,
+    estimatedGrossRevenue: marketEstimate.standard.grossRevenueEstimate,
+    genres: options.genres,
+    tags: options.tags,
+    hybridScore: 100,
+    reviewOverlapPercent: 100,
+    reviewOverlapJaccard: 100,
+    sharedReviewers: options.targetReviewers.size,
+    targetReviewerSampleSize: options.targetReviewers.size,
+    candidateReviewerSampleSize: options.targetReviewers.size,
+    tagSimilarity: 100,
+    genreSimilarity: 100,
+    categorySimilarity: 100,
+    reasons: ["分析対象タイトル"],
+    estimateDiagnostics: getEstimateDiagnostics({
+      totalReviews: reviewSummary.totalReviews,
+      steamPurchaseReviews,
+      price,
+      averagePlaytimeHours,
+      recentReviewActivity7d,
+    }),
+  };
 }
 
 export async function buildAudienceOverlap({
@@ -368,6 +597,15 @@ export async function buildAudienceOverlap({
   ]);
   const targetGenres = getGenres(targetDetails);
   const targetCategories = getCategories(targetDetails);
+  const targetGame = await buildTargetGame({
+    appId,
+    currency,
+    details: targetDetails,
+    genres: targetGenres,
+    categories: targetCategories,
+    tags: targetTags,
+    targetReviewers,
+  });
   const candidateAppIds = unique([...moreLikeAppIds.slice(0, 32), ...STATIC_CANDIDATE_APP_IDS])
     .filter((candidateId) => candidateId !== appId)
     .slice(0, 64);
@@ -400,11 +638,14 @@ export async function buildAudienceOverlap({
     )
   ).filter((candidate): candidate is AudienceOverlapGame => Boolean(candidate));
 
+  const competitors = [...enrichedCandidates].sort(
+    (a, b) => b.hybridScore - a.hybridScore || b.momentumScore - a.momentumScore,
+  );
+
   return {
     appId,
     generatedAt: new Date().toISOString(),
-    sourceNote:
-      "Steam公開情報だけを使った推定です。レビュー投稿者IDはAPI処理中の重なり計算にだけ使い、保存・返却しません。",
+    sourceNote: "Steam公開情報だけを使った推定です。実プレイヤー全体の重複率ではありません。",
     target: {
       appId,
       name: targetDetails.name,
@@ -412,7 +653,9 @@ export async function buildAudienceOverlap({
       tags: targetTags,
       reviewerSampleSize: targetReviewers.size,
     },
-    alsoPlayed: [...enrichedCandidates].sort((a, b) => b.hybridScore - a.hybridScore).slice(0, 10),
+    targetGame,
+    competitors,
+    alsoPlayed: competitors.slice(0, 10),
     reviewerOverlap: [...enrichedCandidates]
       .sort((a, b) => b.reviewOverlapPercent - a.reviewOverlapPercent || b.hybridScore - a.hybridScore)
       .slice(0, 10),
