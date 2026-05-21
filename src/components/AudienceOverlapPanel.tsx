@@ -84,7 +84,9 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
   const allRows = useMemo(() => {
     if (!data) return [];
     const byAppId = new Map<string, AudienceOverlapGame>();
-    for (const row of [...data.alsoPlayed, ...data.reviewerOverlap]) byAppId.set(row.appId, row);
+    for (const row of [...data.alsoPlayed, ...data.reviewerOverlap, ...data.surprisingOverlap]) {
+      byAppId.set(row.appId, row);
+    }
     return Array.from(byAppId.values()).sort((a, b) => b.hybridScore - a.hybridScore);
   }, [data]);
 
@@ -126,8 +128,8 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
           <div>
             <h3 className="font-semibold text-slate-900">類似プレイヤー層分析</h3>
             <p className="mt-1 text-sm leading-6 text-slate-700">
-              Steamの「More Like This」候補、レビュー投稿者の重なり、タグ/ジャンル/カテゴリの近さを組み合わせて、
-              Gamalytic風の類似タイトル表を作ります。実プレイヤー全体の重複率ではなく、公開データだけで作る推定です。
+              Steam上の関連候補、同じ人が両方のゲームにレビューしている割合、タグ/ジャンル/カテゴリの近さを組み合わせて、
+              競合・参考タイトルを探します。実プレイヤー全体の重複率ではなく、公開データだけで作る推定です。
             </p>
             {data && (
               <p className="mt-2 text-xs text-slate-600">
@@ -155,9 +157,6 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
             </button>
           </div>
         </div>
-        <p className="mt-3 text-xs leading-5 text-blue-900">
-          SteamIDやレビュー本文は保存しません。API処理中に投稿者IDの集合を作って重なり人数を計算し、画面には集計済みの数値だけ返します。
-        </p>
       </div>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
@@ -172,19 +171,29 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
         <div className="grid gap-5 xl:grid-cols-2">
           <OverlapTable
             title="このゲームのプレイヤーが遊んでいそうなタイトル"
-            description="レビュー投稿者 overlap とタグ/ジャンル類似度を合成したハイブリッドスコア順です。"
+            description="同じ人が両方にレビューしている割合と、タグ/ジャンルの近さを合成した総合スコア順です。"
             rows={data.alsoPlayed}
-            scoreLabel="ハイブリッド"
+            scoreLabel="総合スコア"
             scoreAccessor={(row) => row.hybridScore}
+            scoreFormatter={(value) => value.toFixed(1)}
             currency={currency}
           />
           <OverlapTable
-            title="レビュー投稿者 overlap"
-            description="対象ゲームのレビュー投稿者サンプルのうち、候補ゲームにもレビューしている人の比率順です。"
+            title="同じレビュー投稿者が多いタイトル"
+            description="対象ゲームにレビューした人のうち、候補ゲームにもレビューしている人の割合順です。ジャンルが近いとは限らないため、実ユーザーの関心の近さを見る補助指標です。"
             rows={data.reviewerOverlap}
-            scoreLabel="投稿者重なり"
+            scoreLabel="投稿者一致"
             scoreAccessor={(row) => row.reviewOverlapPercent}
             currency={currency}
+          />
+          <OverlapTable
+            title="意外な関連候補"
+            description="同じレビュー投稿者がいる一方で、タグの類似度が低いタイトルです。競合ではなく、ユーザーの別ジャンル関心や企画のヒントを探すための表です。"
+            rows={data.surprisingOverlap}
+            scoreLabel="投稿者一致"
+            scoreAccessor={(row) => row.reviewOverlapPercent}
+            currency={currency}
+            className="xl:col-span-2"
           />
         </div>
       )}
@@ -198,17 +207,21 @@ function OverlapTable({
   rows,
   scoreLabel,
   scoreAccessor,
+  scoreFormatter = formatPercent,
   currency,
+  className = "",
 }: {
   title: string;
   description: string;
   rows: AudienceOverlapGame[];
   scoreLabel: string;
   scoreAccessor: (row: AudienceOverlapGame) => number;
+  scoreFormatter?: (value: number) => string;
   currency: CurrencyCode;
+  className?: string;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <section className={`overflow-hidden rounded-xl border border-slate-200 bg-white ${className}`}>
       <div className="border-b border-slate-200 p-4">
         <h3 className="font-semibold text-slate-900">{title}</h3>
         <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
@@ -217,14 +230,14 @@ function OverlapTable({
         <table className="w-full min-w-[960px] text-sm">
           <thead className="sticky top-0 z-10 bg-white">
             <tr className="border-b border-slate-200 text-xs text-slate-500">
-              <th className="px-3 py-3 text-left font-medium">Game</th>
+              <th className="px-3 py-3 text-left font-medium">ゲーム</th>
               <th className="px-3 py-3 text-right font-medium">{scoreLabel}</th>
               <th className="px-3 py-3 text-right font-medium">タグ類似</th>
               <th className="px-3 py-3 text-right font-medium">発売日</th>
               <th className="px-3 py-3 text-right font-medium">価格</th>
               <th className="px-3 py-3 text-right font-medium">推定販売本数</th>
               <th className="px-3 py-3 text-right font-medium">推定売上</th>
-              <th className="px-3 py-3 text-left font-medium">Genres</th>
+              <th className="px-3 py-3 text-left font-medium">ジャンル</th>
             </tr>
           </thead>
           <tbody>
@@ -259,7 +272,7 @@ function OverlapTable({
                   </div>
                 </td>
                 <td className="px-3 py-3 text-right">
-                  <ScorePill value={scoreAccessor(row)} />
+                  <ScorePill value={scoreAccessor(row)} formatter={scoreFormatter} />
                 </td>
                 <td className="px-3 py-3 text-right text-slate-700">{formatPercent(row.tagSimilarity)}</td>
                 <td className="px-3 py-3 text-right text-slate-700">{row.releaseDate}</td>
@@ -279,10 +292,10 @@ function OverlapTable({
   );
 }
 
-function ScorePill({ value }: { value: number }) {
+function ScorePill({ value, formatter }: { value: number; formatter: (value: number) => string }) {
   return (
     <div className="inline-flex min-w-24 flex-col items-end gap-1">
-      <span className="font-semibold text-slate-900">{formatPercent(value)}</span>
+      <span className="font-semibold text-slate-900">{formatter(value)}</span>
       <span className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
         <span className="block h-full rounded-full bg-blue-500" style={{ width: `${Math.min(value, 100)}%` }} />
       </span>

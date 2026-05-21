@@ -191,6 +191,7 @@ export interface AudienceOverlapResponse {
   };
   alsoPlayed: AudienceOverlapGame[];
   reviewerOverlap: AudienceOverlapGame[];
+  surprisingOverlap: AudienceOverlapGame[];
 }
 
 export interface PublicReview {

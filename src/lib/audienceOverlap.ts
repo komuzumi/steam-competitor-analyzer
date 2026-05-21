@@ -244,6 +244,11 @@ function buildReasons({
   return reasons.length ? reasons : ["公開メタ情報の近さから候補化"];
 }
 
+function getReviewSurpriseScore(candidate: AudienceOverlapGame): number {
+  if (candidate.sharedReviewers <= 0) return 0;
+  return candidate.reviewOverlapPercent * Math.max(100 - candidate.tagSimilarity, 0);
+}
+
 async function enrichCandidate(
   candidate: CandidateMetadata,
   options: {
@@ -347,15 +352,23 @@ export async function buildAudienceOverlap({
   const targetCategories = getCategories(targetDetails);
   const candidateAppIds = unique([...moreLikeAppIds, ...STATIC_CANDIDATE_APP_IDS])
     .filter((candidateId) => candidateId !== appId)
-    .slice(0, 28);
-  const candidateMetadata = (
+    .slice(0, 48);
+  const allCandidateMetadata = (
     await mapWithConcurrency(candidateAppIds, 4, (candidateId) =>
       fetchCandidateMetadata(candidateId, currencyOption.steamCC, targetGenres, targetCategories, targetTags),
     )
   )
     .filter((candidate): candidate is CandidateMetadata => Boolean(candidate))
-    .sort((a, b) => b.metadataScore - a.metadataScore)
-    .slice(0, 12);
+    .sort((a, b) => b.metadataScore - a.metadataScore);
+  const strongMetadataMatches = allCandidateMetadata.slice(0, 12);
+  const exploratoryMetadataMatches = allCandidateMetadata
+    .slice(12)
+    .filter((candidate) => candidate.metadataScore < 45)
+    .sort((a, b) => (b.details.recommendations?.total ?? 0) - (a.details.recommendations?.total ?? 0))
+    .slice(0, 8);
+  const candidateMetadata = unique([...strongMetadataMatches, ...exploratoryMetadataMatches].map((candidate) => candidate.appId))
+    .map((candidateId) => allCandidateMetadata.find((candidate) => candidate.appId === candidateId))
+    .filter((candidate): candidate is CandidateMetadata => Boolean(candidate));
 
   const enrichedCandidates = (
     await mapWithConcurrency(candidateMetadata, 3, (candidate) =>
@@ -384,6 +397,10 @@ export async function buildAudienceOverlap({
     alsoPlayed: [...enrichedCandidates].sort((a, b) => b.hybridScore - a.hybridScore).slice(0, 10),
     reviewerOverlap: [...enrichedCandidates]
       .sort((a, b) => b.reviewOverlapPercent - a.reviewOverlapPercent || b.hybridScore - a.hybridScore)
+      .slice(0, 10),
+    surprisingOverlap: [...enrichedCandidates]
+      .filter((candidate) => candidate.sharedReviewers > 0 && candidate.tagSimilarity < 35)
+      .sort((a, b) => getReviewSurpriseScore(b) - getReviewSurpriseScore(a))
       .slice(0, 10),
   };
 }
