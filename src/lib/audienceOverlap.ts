@@ -2,6 +2,7 @@ import {
   AudienceClassification,
   AudienceOverlapGame,
   AudienceOverlapResponse,
+  AudienceOverlapSampleMode,
   RecentReviewActivity,
 } from "@/types";
 import { CurrencyCode, getCurrencyOption } from "@/lib/currency";
@@ -85,7 +86,24 @@ interface CandidateMetadata {
 interface BuildAudienceOverlapOptions {
   appId: string;
   currency: CurrencyCode;
+  sampleMode?: AudienceOverlapSampleMode;
 }
+
+const REVIEWER_SAMPLE_SETTINGS: Record<
+  AudienceOverlapSampleMode,
+  { targetReviewers: number; candidateReviewers: number; label: string }
+> = {
+  standard: {
+    targetReviewers: 1_500,
+    candidateReviewers: 700,
+    label: "標準",
+  },
+  high: {
+    targetReviewers: 3_000,
+    candidateReviewers: 1_500,
+    label: "高精度",
+  },
+};
 
 function unique(items: string[]): string[] {
   return Array.from(new Set(items.filter(Boolean)));
@@ -161,7 +179,7 @@ async function fetchReviewAuthorSample(appId: string, maxReviews: number): Promi
   while (steamIds.size < maxReviews) {
     const result = await fetchReviews(appId, {
       cursor,
-      filter: "all",
+      filter: "recent",
       language: "all",
       reviewType: "all",
       purchaseType: "all",
@@ -382,6 +400,7 @@ async function enrichCandidate(
     targetCategories: string[];
     targetTags: string[];
     targetReviewers: Set<string>;
+    candidateReviewerSampleLimit: number;
   },
 ): Promise<AudienceOverlapGame | null> {
   try {
@@ -394,7 +413,7 @@ async function enrichCandidate(
       currentPlayers,
       recentSteamPurchaseReviews7d,
     ] = await Promise.all([
-      fetchReviewAuthorSample(candidate.appId, 400).catch(() => new Set<string>()),
+      fetchReviewAuthorSample(candidate.appId, options.candidateReviewerSampleLimit).catch(() => new Set<string>()),
       fetchReviewSummary(candidate.appId).catch(() => ({ totalReviews: 0, totalPositive: 0, totalNegative: 0 })),
       fetchSteamPurchaseReviewCount(candidate.appId).catch(() => 0),
       fetchReviewPlaytimeSample(candidate.appId).catch(() => null),
@@ -595,13 +614,15 @@ async function buildTargetGame(options: {
 export async function buildAudienceOverlap({
   appId,
   currency,
+  sampleMode = "standard",
 }: BuildAudienceOverlapOptions): Promise<AudienceOverlapResponse> {
   const currencyOption = getCurrencyOption(currency);
+  const sampleSettings = REVIEWER_SAMPLE_SETTINGS[sampleMode] ?? REVIEWER_SAMPLE_SETTINGS.standard;
   const [targetDetails, targetTags, moreLikeAppIds, targetReviewers] = await Promise.all([
     fetchAppDetails(appId, currencyOption.steamCC),
     fetchSteamTags(appId).catch(() => []),
     fetchSteamMoreLikeAppIds(appId).catch(() => []),
-    fetchReviewAuthorSample(appId, 800).catch(() => new Set<string>()),
+    fetchReviewAuthorSample(appId, sampleSettings.targetReviewers).catch(() => new Set<string>()),
   ]);
   const targetGenres = getGenres(targetDetails);
   const targetCategories = getCategories(targetDetails);
@@ -642,6 +663,7 @@ export async function buildAudienceOverlap({
         targetCategories,
         targetTags,
         targetReviewers,
+        candidateReviewerSampleLimit: sampleSettings.candidateReviewers,
       }),
     )
   ).filter((candidate): candidate is AudienceOverlapGame => Boolean(candidate));
@@ -654,6 +676,11 @@ export async function buildAudienceOverlap({
     appId,
     generatedAt: new Date().toISOString(),
     sourceNote: "Steam公開情報だけを使った推定です。実プレイヤー全体の重複率ではありません。",
+    sampleMode,
+    sampleLimits: {
+      targetReviewers: sampleSettings.targetReviewers,
+      candidateReviewers: sampleSettings.candidateReviewers,
+    },
     target: {
       appId,
       name: targetDetails.name,

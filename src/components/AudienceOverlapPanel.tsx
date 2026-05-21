@@ -11,7 +11,12 @@ import {
   YAxis,
   ZAxis,
 } from "recharts";
-import { AudienceClassification, AudienceOverlapGame, AudienceOverlapResponse } from "@/types";
+import {
+  AudienceClassification,
+  AudienceOverlapGame,
+  AudienceOverlapResponse,
+  AudienceOverlapSampleMode,
+} from "@/types";
 import { CurrencyCode, formatPrice } from "@/lib/currency";
 
 interface Props {
@@ -50,6 +55,16 @@ const CLASSIFICATION_ORDER: Exclude<AudienceClassification, "target">[] = [
   "surprising_link",
   "fanbase_neighbor",
 ];
+
+const SAMPLE_MODE_LABELS: Record<AudienceOverlapSampleMode, string> = {
+  standard: "標準",
+  high: "高精度",
+};
+
+const SAMPLE_MODE_DESCRIPTIONS: Record<AudienceOverlapSampleMode, string> = {
+  standard: "対象最大1,500人、候補最大700人の投稿者サンプルで取得します。",
+  high: "対象最大3,000人、候補最大1,500人まで広げます。取得時間は長くなります。",
+};
 
 function formatShortNumber(n: number): string {
   const rounded = Math.round(n);
@@ -141,7 +156,8 @@ function makeCsv(rows: AudienceOverlapGame[]): string {
 }
 
 export default function AudienceOverlapPanel({ appId, currency }: Props) {
-  const currentKey = `${appId}:${currency}`;
+  const [sampleMode, setSampleMode] = useState<AudienceOverlapSampleMode>("standard");
+  const currentKey = `${appId}:${currency}:${sampleMode}`;
   const [dataState, setDataState] = useState<{ key: string; value: AudienceOverlapResponse } | null>(null);
   const [classificationFilter, setClassificationFilter] = useState<ClassificationFilter>("all");
   const [loading, setLoading] = useState(false);
@@ -172,7 +188,12 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
     setLoading(true);
     setErrorState(null);
     try {
-      const res = await fetch(`/api/audience-overlap?appId=${encodeURIComponent(appId)}&currency=${currency}`);
+      const params = new URLSearchParams({
+        appId,
+        currency,
+        sampleMode,
+      });
+      const res = await fetch(`/api/audience-overlap?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "競合分析に失敗しました。");
       setDataState({ key: currentKey, value: json });
@@ -209,9 +230,30 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
               Steam上の関連候補、同じ人が両方のゲームにレビューしている割合、タグ/ジャンル/カテゴリ、直近レビューと同接を組み合わせて、
               競合・参考タイトルを分類します。実プレイヤー全体の重複率ではなく、公開データだけで作る推定です。
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {(Object.keys(SAMPLE_MODE_LABELS) as AudienceOverlapSampleMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setSampleMode(mode)}
+                  disabled={loading}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                    sampleMode === mode
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {SAMPLE_MODE_LABELS[mode]}
+                </button>
+              ))}
+              <span className="text-xs text-slate-600">{SAMPLE_MODE_DESCRIPTIONS[sampleMode]}</span>
+            </div>
             {data && (
               <p className="mt-2 text-xs text-slate-600">
-                対象レビュー投稿者サンプル: {data.target.reviewerSampleSize.toLocaleString("ja-JP")}人 / 対象タグ:{" "}
+                取得モード: {SAMPLE_MODE_LABELS[data.sampleMode]} / 対象レビュー投稿者サンプル:{" "}
+                {data.target.reviewerSampleSize.toLocaleString("ja-JP")}人
+                （上限 {data.sampleLimits.targetReviewers.toLocaleString("ja-JP")}人） / 候補上限:{" "}
+                {data.sampleLimits.candidateReviewers.toLocaleString("ja-JP")}人 / 対象タグ:{" "}
                 {data.target.tags.slice(0, 8).join(" / ") || "取得なし"}
               </p>
             )}
@@ -241,7 +283,8 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
 
       {loading && (
         <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">
-          競合候補のメタ情報、タグ、レビュー投稿者サンプル、直近レビュー、同接を取得しています。大型タイトルでは少し時間がかかります。
+          競合候補のメタ情報、タグ、レビュー投稿者サンプル、直近レビュー、同接を取得しています。
+          {sampleMode === "high" ? "高精度モードのため、通常より時間がかかります。" : "大型タイトルでは少し時間がかかります。"}
         </div>
       )}
 
@@ -283,7 +326,7 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
               title="同じレビュー投稿者が多いタイトル"
               description="対象ゲームにレビューした人のうち、候補ゲームにもレビューしている人の割合順です。ジャンルが近いとは限らないため、実ユーザーの関心の近さを見る補助指標です。"
               rows={data.reviewerOverlap}
-              scoreLabel="投稿者一致"
+              scoreLabel="サンプル一致"
               scoreAccessor={(row) => row.reviewOverlapPercent}
               currency={currency}
               showReviewerOverlapDetail
@@ -292,7 +335,7 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
               title="意外な関連候補"
               description="同じレビュー投稿者がいる一方で、タグ類似が低め、または総合スコアでは上位に出にくいタイトルです。競合ではなく、ユーザーの別ジャンル関心や企画のヒントを探すための表です。"
               rows={data.surprisingOverlap}
-              scoreLabel="投稿者一致"
+              scoreLabel="サンプル一致"
               scoreAccessor={(row) => row.reviewOverlapPercent}
               currency={currency}
               className="xl:col-span-2"
@@ -355,7 +398,7 @@ function CompetitiveComparisonTable({ rows, currency }: { rows: AudienceOverlapG
             <tr className="border-b border-slate-200 text-xs text-slate-500">
               <th className="px-3 py-3 text-left font-medium">ゲーム</th>
               <th className="px-3 py-3 text-left font-medium">分類</th>
-              <th className="px-3 py-3 text-right font-medium">投稿者一致</th>
+              <th className="px-3 py-3 text-right font-medium">投稿者サンプル一致</th>
               <th className="px-3 py-3 text-right font-medium">タグ類似</th>
               <th className="px-3 py-3 text-right font-medium">価格</th>
               <th className="px-3 py-3 text-right font-medium">発売日</th>
@@ -596,7 +639,7 @@ function PositionTooltip({
       <p className="text-slate-600">好評率: {formatPercent(row.positiveRate)}</p>
       <p className="text-slate-600">推定売上: {formatPrice(row.estimatedGrossRevenue, currency)}</p>
       <p className="text-slate-600">推定販売本数: {formatShortNumber(row.estimatedCopiesSold)}</p>
-      <p className="text-slate-600">投稿者一致: {formatReviewerOverlap(row)}</p>
+      <p className="text-slate-600">投稿者サンプル一致: {formatReviewerOverlap(row)}</p>
       <p className="text-slate-600">タグ類似: {formatPercent(row.tagSimilarity)}</p>
     </div>
   );

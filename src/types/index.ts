@@ -211,6 +211,8 @@ export interface AudienceOverlapGame {
   estimateDiagnostics: string[];
 }
 
+export type AudienceOverlapSampleMode = "standard" | "high";
+
 export type AudienceClassification =
   | "target"
   | "direct_competitor"
@@ -229,6 +231,11 @@ export interface AudienceOverlapResponse {
   appId: string;
   generatedAt: string;
   sourceNote: string;
+  sampleMode: AudienceOverlapSampleMode;
+  sampleLimits: {
+    targetReviewers: number;
+    candidateReviewers: number;
+  };
   target: {
     appId: string;
     name: string;
