@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import {
   CartesianGrid,
-  Cell,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -38,6 +37,20 @@ const CLASSIFICATION_COLORS: Record<AudienceClassification, string> = {
   fanbase_neighbor: "#7c3aed",
 };
 
+const CLASSIFICATION_DESCRIPTIONS: Record<Exclude<AudienceClassification, "target">, string> = {
+  direct_competitor: "タグとジャンルが近く、同じ棚で比較されやすい候補です。",
+  adjacent_genre: "タグやカテゴリが部分的に近く、比較対象に入りやすい候補です。",
+  surprising_link: "タグは離れていますが、同じ投稿者がレビューしている候補です。",
+  fanbase_neighbor: "同じ投稿者の重なりがあり、ユーザー関心が近い可能性があります。",
+};
+
+const CLASSIFICATION_ORDER: Exclude<AudienceClassification, "target">[] = [
+  "direct_competitor",
+  "adjacent_genre",
+  "surprising_link",
+  "fanbase_neighbor",
+];
+
 function formatShortNumber(n: number): string {
   const rounded = Math.round(n);
   const abs = Math.abs(rounded);
@@ -49,6 +62,11 @@ function formatShortNumber(n: number): string {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+}
+
+function formatReviewerOverlap(row: AudienceOverlapGame): string {
+  if (row.classification === "target") return "対象";
+  return `${row.sharedReviewers.toLocaleString("ja-JP")} / ${row.targetReviewerSampleSize.toLocaleString("ja-JP")} (${formatPercent(row.reviewOverlapPercent)})`;
 }
 
 function formatNullableNumber(value: number | null): string {
@@ -268,6 +286,7 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
               scoreLabel="投稿者一致"
               scoreAccessor={(row) => row.reviewOverlapPercent}
               currency={currency}
+              showReviewerOverlapDetail
             />
             <CandidateTable
               title="意外な関連候補"
@@ -277,6 +296,7 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
               scoreAccessor={(row) => row.reviewOverlapPercent}
               currency={currency}
               className="xl:col-span-2"
+              showReviewerOverlapDetail
             />
           </div>
         </>
@@ -327,9 +347,7 @@ function CompetitiveComparisonTable({ rows, currency }: { rows: AudienceOverlapG
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 p-4">
         <h3 className="font-semibold text-slate-900">競合比較テーブル</h3>
-        <p className="mt-1 text-xs leading-5 text-slate-500">
-          対象タイトルと候補を同じ列で比較します。信頼度診断は推定を見るときの注意点です。
-        </p>
+        <ClassificationDescription rows={rows} />
       </div>
       <div className="max-h-[560px] overflow-auto">
         <table className="w-full min-w-[1760px] text-sm">
@@ -382,7 +400,9 @@ function CompetitiveComparisonTable({ rows, currency }: { rows: AudienceOverlapG
                   <ClassificationPill row={row} />
                   <p className="mt-1 max-w-48 text-xs leading-5 text-slate-500">{row.classificationReason}</p>
                 </td>
-                <td className="px-3 py-3 text-right text-slate-700">{formatPercent(row.reviewOverlapPercent)}</td>
+                <td className="px-3 py-3 text-right text-slate-700">
+                  <ReviewerOverlapCell row={row} />
+                </td>
                 <td className="px-3 py-3 text-right text-slate-700">{formatPercent(row.tagSimilarity)}</td>
                 <td className="px-3 py-3 text-right text-slate-700">{formatPrice(row.price, currency)}</td>
                 <td className="px-3 py-3 text-right text-slate-700">{row.releaseDate}</td>
@@ -417,6 +437,55 @@ function CompetitiveComparisonTable({ rows, currency }: { rows: AudienceOverlapG
   );
 }
 
+function ClassificationDescription({ rows }: { rows: AudienceOverlapGame[] }) {
+  const visibleClassifications = CLASSIFICATION_ORDER.filter((classification) =>
+    rows.some((row) => row.classification === classification),
+  );
+
+  if (!visibleClassifications.length) {
+    return <p className="mt-1 text-xs leading-5 text-slate-500">候補を取得すると、分類カテゴリの意味をここに表示します。</p>;
+  }
+
+  return (
+    <div className="mt-3 grid gap-2 lg:grid-cols-2">
+      {visibleClassifications.map((classification) => (
+        <div key={classification} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: CLASSIFICATION_COLORS[classification] }}
+            />
+            <p className="text-xs font-semibold text-slate-800">{CLASSIFICATION_LABELS[classification]}</p>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{CLASSIFICATION_DESCRIPTIONS[classification]}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReviewerOverlapCell({ row }: { row: AudienceOverlapGame }) {
+  if (row.classification === "target") {
+    return (
+      <div className="text-right">
+        <p className="font-semibold text-slate-900">対象</p>
+        <p className="text-[11px] text-slate-400">
+          {row.targetReviewerSampleSize.toLocaleString("ja-JP")}人サンプル
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-right">
+      <p className="font-semibold text-slate-900">{formatPercent(row.reviewOverlapPercent)}</p>
+      <p className="text-[11px] text-slate-400">
+        {row.sharedReviewers.toLocaleString("ja-JP")} / {row.targetReviewerSampleSize.toLocaleString("ja-JP")}人
+      </p>
+    </div>
+  );
+}
+
 function PositioningMap({ rows, currency }: { rows: AudienceOverlapGame[]; currency: CurrencyCode }) {
   const points = rows
     .filter((row) => row.price >= 0 && row.positiveRate >= 0)
@@ -433,7 +502,7 @@ function PositioningMap({ rows, currency }: { rows: AudienceOverlapGame[]; curre
       <div className="mb-3">
         <h3 className="font-semibold text-slate-900">競合ポジショニングマップ</h3>
         <p className="mt-1 text-xs leading-5 text-slate-500">
-          X軸は価格、Y軸は好評率、円サイズは推定売上です。色は競合分類を表します。
+          X軸は価格、Y軸は好評率、円形画像のサイズは推定売上です。枠色は競合分類を表します。
         </p>
       </div>
       <div className="h-[360px]">
@@ -455,18 +524,57 @@ function PositioningMap({ rows, currency }: { rows: AudienceOverlapGame[]; curre
                 name={classification === "target" ? "対象" : CLASSIFICATION_LABELS[classification]}
                 data={points.filter((point) => point.classification === classification)}
                 fill={CLASSIFICATION_COLORS[classification]}
-              >
-                {points
-                  .filter((point) => point.classification === classification)
-                  .map((point) => (
-                    <Cell key={point.appId} fill={CLASSIFICATION_COLORS[point.classification]} />
-                  ))}
-              </Scatter>
+                shape={(props: unknown) => <GameImagePoint {...(props as GameImagePointProps)} />}
+              />
             ))}
           </ScatterChart>
         </ResponsiveContainer>
       </div>
     </section>
+  );
+}
+
+interface GameImagePointProps {
+  cx?: number | string;
+  cy?: number | string;
+  fill?: string;
+  payload?: AudienceOverlapGame & { z?: number };
+}
+
+function GameImagePoint({ cx, cy, fill, payload }: GameImagePointProps) {
+  const x = Number(cx ?? 0);
+  const y = Number(cy ?? 0);
+  if (!payload || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+  const revenueScale = Math.sqrt(Number(payload.z ?? 160)) * 2.4;
+  const minimumSize = payload.classification === "target" ? 42 : 30;
+  const size = Math.max(minimumSize, Math.min(58, revenueScale));
+  const radius = size / 2;
+  const strokeColor = fill || CLASSIFICATION_COLORS[payload.classification];
+  const clipId = `position-map-icon-${payload.classification}-${payload.appId}`;
+
+  return (
+    <g>
+      <defs>
+        <clipPath id={clipId}>
+          <circle cx={x} cy={y} r={radius - 3} />
+        </clipPath>
+      </defs>
+      <circle cx={x} cy={y} r={radius} fill="#fff" stroke={strokeColor} strokeWidth={payload.classification === "target" ? 3 : 2} />
+      {payload.headerImage ? (
+        <image
+          href={payload.headerImage}
+          x={x - radius + 3}
+          y={y - radius + 3}
+          width={(radius - 3) * 2}
+          height={(radius - 3) * 2}
+          preserveAspectRatio="xMidYMid slice"
+          clipPath={`url(#${clipId})`}
+        />
+      ) : (
+        <circle cx={x} cy={y} r={radius - 5} fill={strokeColor} opacity={0.78} />
+      )}
+    </g>
   );
 }
 
@@ -489,7 +597,7 @@ function PositionTooltip({
       <p className="text-slate-600">好評率: {formatPercent(row.positiveRate)}</p>
       <p className="text-slate-600">推定売上: {formatPrice(row.estimatedGrossRevenue, currency)}</p>
       <p className="text-slate-600">推定販売本数: {formatShortNumber(row.estimatedCopiesSold)}</p>
-      <p className="text-slate-600">投稿者一致: {formatPercent(row.reviewOverlapPercent)}</p>
+      <p className="text-slate-600">投稿者一致: {formatReviewerOverlap(row)}</p>
       <p className="text-slate-600">タグ類似: {formatPercent(row.tagSimilarity)}</p>
     </div>
   );
@@ -504,6 +612,7 @@ function CandidateTable({
   scoreFormatter = formatPercent,
   currency,
   className = "",
+  showReviewerOverlapDetail = false,
 }: {
   title: string;
   description: string;
@@ -513,6 +622,7 @@ function CandidateTable({
   scoreFormatter?: (value: number) => string;
   currency: CurrencyCode;
   className?: string;
+  showReviewerOverlapDetail?: boolean;
 }) {
   return (
     <section className={`overflow-hidden rounded-xl border border-slate-200 bg-white ${className}`}>
@@ -571,6 +681,12 @@ function CandidateTable({
                 </td>
                 <td className="px-3 py-3 text-right">
                   <ScorePill value={scoreAccessor(row)} formatter={scoreFormatter} />
+                  {showReviewerOverlapDetail && (
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {row.sharedReviewers.toLocaleString("ja-JP")} /{" "}
+                      {row.targetReviewerSampleSize.toLocaleString("ja-JP")}人
+                    </p>
+                  )}
                 </td>
                 <td className="px-3 py-3 text-right text-slate-700">{formatPercent(row.tagSimilarity)}</td>
                 <td className="px-3 py-3 text-right">
