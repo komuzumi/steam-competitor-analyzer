@@ -197,8 +197,17 @@ export function extractEditionPrices(details: SteamAppDetails): EditionPrice[] {
   return editions.sort((a, b) => a.basePrice - b.basePrice);
 }
 
-export async function fetchAppDetails(appId: string, cc: string = "jp"): Promise<SteamAppDetails> {
-  const res = await fetchWithTimeout(`${STEAM_STORE_API}/appdetails?appids=${appId}&cc=${cc}&l=english`, {
+export async function fetchAppDetails(
+  appId: string,
+  cc: string = "jp",
+  language: string = "english",
+): Promise<SteamAppDetails> {
+  const params = new URLSearchParams({
+    appids: appId,
+    cc,
+    l: language,
+  });
+  const res = await fetchWithTimeout(`${STEAM_STORE_API}/appdetails?${params.toString()}`, {
     next: { revalidate: 3600 },
   });
 
@@ -211,6 +220,19 @@ export async function fetchAppDetails(appId: string, cc: string = "jp"): Promise
   }
 
   return appData.data;
+}
+
+export async function fetchLocalizedAppName(
+  appId: string,
+  cc: string = "jp",
+  fallbackName?: string,
+): Promise<string> {
+  try {
+    const details = await fetchAppDetails(appId, cc, "japanese");
+    return details.name || fallbackName || appId;
+  } catch {
+    return fallbackName || appId;
+  }
 }
 
 function decodeHtmlEntity(text: string): string {

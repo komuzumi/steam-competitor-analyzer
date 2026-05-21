@@ -11,6 +11,7 @@ import {
   extractEditionPrices,
   fetchAppDetails,
   fetchCurrentPlayers,
+  fetchLocalizedAppName,
   fetchRecentSteamPurchaseReviewCount,
   fetchReviewPlaytimeSample,
   fetchReviews,
@@ -76,6 +77,7 @@ const STATIC_CANDIDATE_APP_IDS = [
 
 interface CandidateMetadata {
   appId: string;
+  displayName: string;
   details: SteamAppDetails;
   genres: string[];
   categories: string[];
@@ -221,12 +223,14 @@ async function fetchCandidateMetadata(
 ): Promise<CandidateMetadata | null> {
   try {
     const [details, tags] = await Promise.all([fetchAppDetails(appId, steamCC), fetchSteamTags(appId).catch(() => [])]);
+    const displayName = await fetchLocalizedAppName(appId, steamCC, details.name);
     const genres = getGenres(details);
     const categories = getCategories(details);
     const metadataScore = getMetadataScore({ genres, categories, tags }, targetGenres, targetCategories, targetTags);
 
     return {
       appId,
+      displayName,
       details,
       genres,
       categories,
@@ -483,7 +487,7 @@ async function enrichCandidate(
 
     return {
       appId: candidate.appId,
-      name: candidate.details.name,
+      name: candidate.displayName,
       headerImage: candidate.details.header_image,
       classification: classification.classification,
       classificationLabel: classification.label,
@@ -535,6 +539,7 @@ async function buildTargetGame(options: {
   categories: string[];
   tags: string[];
   targetReviewers: Set<string>;
+  displayName: string;
 }): Promise<AudienceOverlapGame> {
   const [reviewSummary, steamPurchaseReviews, averagePlaytimeHours, usdDetails, currentPlayers, recentSteamPurchaseReviews7d] =
     await Promise.all([
@@ -570,7 +575,7 @@ async function buildTargetGame(options: {
 
   return {
     appId: options.appId,
-    name: options.details.name,
+    name: options.displayName,
     headerImage: options.details.header_image,
     classification: "target",
     classificationLabel: "対象",
@@ -624,6 +629,7 @@ export async function buildAudienceOverlap({
     fetchSteamMoreLikeAppIds(appId).catch(() => []),
     fetchReviewAuthorSample(appId, sampleSettings.targetReviewers).catch(() => new Set<string>()),
   ]);
+  const targetDisplayName = await fetchLocalizedAppName(appId, currencyOption.steamCC, targetDetails.name);
   const targetGenres = getGenres(targetDetails);
   const targetCategories = getCategories(targetDetails);
   const targetGame = await buildTargetGame({
@@ -634,6 +640,7 @@ export async function buildAudienceOverlap({
     categories: targetCategories,
     tags: targetTags,
     targetReviewers,
+    displayName: targetDisplayName,
   });
   const candidateAppIds = unique([...moreLikeAppIds.slice(0, 32), ...STATIC_CANDIDATE_APP_IDS])
     .filter((candidateId) => candidateId !== appId)
@@ -683,7 +690,7 @@ export async function buildAudienceOverlap({
     },
     target: {
       appId,
-      name: targetDetails.name,
+      name: targetDisplayName,
       genres: targetGenres,
       tags: targetTags,
       reviewerSampleSize: targetReviewers.size,
