@@ -249,6 +249,24 @@ function getReviewSurpriseScore(candidate: AudienceOverlapGame): number {
   return candidate.reviewOverlapPercent * Math.max(100 - candidate.tagSimilarity, 0);
 }
 
+function selectSurprisingOverlap(candidates: AudienceOverlapGame[]): AudienceOverlapGame[] {
+  const strict = candidates
+    .filter((candidate) => candidate.sharedReviewers > 0 && candidate.tagSimilarity < 55)
+    .sort((a, b) => getReviewSurpriseScore(b) - getReviewSurpriseScore(a));
+  const selected = new Map(strict.map((candidate) => [candidate.appId, candidate]));
+
+  const fallback = candidates
+    .filter((candidate) => candidate.sharedReviewers > 0 && !selected.has(candidate.appId))
+    .sort(
+      (a, b) =>
+        getReviewSurpriseScore(b) - getReviewSurpriseScore(a) ||
+        b.reviewOverlapPercent - a.reviewOverlapPercent ||
+        a.tagSimilarity - b.tagSimilarity,
+    );
+
+  return [...strict, ...fallback].slice(0, 10);
+}
+
 async function enrichCandidate(
   candidate: CandidateMetadata,
   options: {
@@ -350,9 +368,9 @@ export async function buildAudienceOverlap({
   ]);
   const targetGenres = getGenres(targetDetails);
   const targetCategories = getCategories(targetDetails);
-  const candidateAppIds = unique([...moreLikeAppIds, ...STATIC_CANDIDATE_APP_IDS])
+  const candidateAppIds = unique([...moreLikeAppIds.slice(0, 32), ...STATIC_CANDIDATE_APP_IDS])
     .filter((candidateId) => candidateId !== appId)
-    .slice(0, 48);
+    .slice(0, 64);
   const allCandidateMetadata = (
     await mapWithConcurrency(candidateAppIds, 4, (candidateId) =>
       fetchCandidateMetadata(candidateId, currencyOption.steamCC, targetGenres, targetCategories, targetTags),
@@ -360,12 +378,12 @@ export async function buildAudienceOverlap({
   )
     .filter((candidate): candidate is CandidateMetadata => Boolean(candidate))
     .sort((a, b) => b.metadataScore - a.metadataScore);
-  const strongMetadataMatches = allCandidateMetadata.slice(0, 12);
+  const strongMetadataMatches = allCandidateMetadata.slice(0, 14);
   const exploratoryMetadataMatches = allCandidateMetadata
-    .slice(12)
-    .filter((candidate) => candidate.metadataScore < 45)
+    .slice(14)
+    .filter((candidate) => candidate.metadataScore < 55)
     .sort((a, b) => (b.details.recommendations?.total ?? 0) - (a.details.recommendations?.total ?? 0))
-    .slice(0, 8);
+    .slice(0, 12);
   const candidateMetadata = unique([...strongMetadataMatches, ...exploratoryMetadataMatches].map((candidate) => candidate.appId))
     .map((candidateId) => allCandidateMetadata.find((candidate) => candidate.appId === candidateId))
     .filter((candidate): candidate is CandidateMetadata => Boolean(candidate));
@@ -398,9 +416,6 @@ export async function buildAudienceOverlap({
     reviewerOverlap: [...enrichedCandidates]
       .sort((a, b) => b.reviewOverlapPercent - a.reviewOverlapPercent || b.hybridScore - a.hybridScore)
       .slice(0, 10),
-    surprisingOverlap: [...enrichedCandidates]
-      .filter((candidate) => candidate.sharedReviewers > 0 && candidate.tagSimilarity < 35)
-      .sort((a, b) => getReviewSurpriseScore(b) - getReviewSurpriseScore(a))
-      .slice(0, 10),
+    surprisingOverlap: selectSurprisingOverlap(enrichedCandidates),
   };
 }

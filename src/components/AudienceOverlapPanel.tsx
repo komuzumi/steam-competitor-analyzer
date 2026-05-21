@@ -188,7 +188,7 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
           />
           <OverlapTable
             title="意外な関連候補"
-            description="同じレビュー投稿者がいる一方で、タグの類似度が低いタイトルです。競合ではなく、ユーザーの別ジャンル関心や企画のヒントを探すための表です。"
+            description="同じレビュー投稿者がいる一方で、タグ類似が低め、または総合スコアでは上位に出にくいタイトルです。競合ではなく、ユーザーの別ジャンル関心や企画のヒントを探すための表です。"
             rows={data.surprisingOverlap}
             scoreLabel="投稿者一致"
             scoreAccessor={(row) => row.reviewOverlapPercent}

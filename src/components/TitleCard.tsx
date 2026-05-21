@@ -469,8 +469,12 @@ export default function TitleCard({ data, currency }: Props) {
             </div>
           )}
 
-          {tab === "ai" && <ReviewTools data={data} />}
-          {tab === "audience" && <AudienceOverlapPanel appId={data.appId} currency={currency} />}
+          <div className={tab === "ai" ? "" : "hidden"}>
+            <ReviewTools data={data} />
+          </div>
+          <div className={tab === "audience" ? "" : "hidden"}>
+            <AudienceOverlapPanel appId={data.appId} currency={currency} />
+          </div>
         </div>
       </div>
     </section>
