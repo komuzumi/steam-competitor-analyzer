@@ -197,7 +197,7 @@ export default function TitleCard({ data, currency }: Props) {
             ["overview", "概要"],
             ["estimate", "売上推定"],
             ["reviews", "レビュー/言語"],
-            ["audience", "類似タイトル"],
+            ["audience", "競合分析"],
             ["ai", "AI/CSV"],
           ].map(([key, label]) => (
             <button

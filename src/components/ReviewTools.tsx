@@ -150,6 +150,51 @@ function SummarySection({ title, content }: { title: string; content: string }) 
   );
 }
 
+function IssueCategoryPanel({ summary }: { summary: AISummaryResult }) {
+  if (!summary.issueCategories?.length) return null;
+
+  const severityLabel = {
+    high: "高",
+    medium: "中",
+    low: "低",
+  } as const;
+  const severityClass = {
+    high: "border-red-100 bg-red-50 text-red-700",
+    medium: "border-amber-100 bg-amber-50 text-amber-700",
+    low: "border-slate-100 bg-slate-50 text-slate-700",
+  } as const;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="mb-3">
+        <p className="text-sm font-semibold text-slate-800">レビュー課題カテゴリ</p>
+        <p className="text-xs text-slate-500">AI分析時に、頻出不満をカテゴリ別に整理します。</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {summary.issueCategories.map((category) => (
+          <div key={`${category.category}-${category.label}`} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-medium text-slate-800">{category.label}</p>
+              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${severityClass[category.severity]}`}>
+                重要度 {severityLabel[category.severity]}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">言及目安: {formatNumber(category.mentions)}件</p>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+              {formatAiReportText(category.summary)}
+            </p>
+            {category.opportunity && (
+              <p className="mt-2 whitespace-pre-wrap rounded-md bg-white p-2 text-xs leading-5 text-slate-600">
+                示唆: {formatAiReportText(category.opportunity)}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function buildPublicReviewSampleMeta({
   reviews,
   mode,
@@ -304,6 +349,15 @@ function buildAiSummaryMarkdown({
     "## 海外展開時の注意点",
     formatAiReportText(summary.globalExpansionNotes),
     "",
+    "## レビュー課題カテゴリ",
+    ...(summary.issueCategories?.length
+      ? summary.issueCategories.flatMap((category) => [
+          `### ${category.label}（重要度: ${category.severity} / 言及目安: ${category.mentions}件）`,
+          formatAiReportText(category.summary),
+          `示唆: ${formatAiReportText(category.opportunity)}`,
+          "",
+        ])
+      : ["- なし", ""]),
   ].join("\n");
 }
 
@@ -794,6 +848,7 @@ export default function ReviewTools({ data }: Props) {
           </div>
           <div className="space-y-3">
             {aiSampleMeta && <AiSampleMetaPanel meta={aiSampleMeta} />}
+            <IssueCategoryPanel summary={aiSummary} />
             <SummarySection title="高評価の理由" content={aiSummary.positiveReasons} />
             <SummarySection title="低評価の理由" content={aiSummary.negativeReasons} />
             <SummarySection title="頻出する不満" content={aiSummary.frequentComplaints} />

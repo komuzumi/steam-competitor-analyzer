@@ -40,7 +40,17 @@ ${reviewCorpus}
   "negativeReasons": "低評価の主な理由。箇条書きで3-5点。",
   "frequentComplaints": "頻出する不満点。箇条書きで3-5点。",
   "planningInsights": "ゲーム企画・改善に活かせる示唆。箇条書きで3-5点。",
-  "globalExpansionNotes": "海外展開・ローカライズ面の注意点。箇条書きで3-5点。"
+  "globalExpansionNotes": "海外展開・ローカライズ面の注意点。箇条書きで3-5点。",
+  "issueCategories": [
+    {
+      "category": "bugs_stability | controls | price_volume | difficulty | multiplayer_online | localization | content_shortage | other",
+      "label": "日本語カテゴリ名",
+      "severity": "high | medium | low",
+      "mentions": 0,
+      "summary": "このカテゴリの不満傾向を1-2文で要約",
+      "opportunity": "企画・改善に活かせる具体的な示唆"
+    }
+  ]
 }`;
 }
 
@@ -59,7 +69,41 @@ function normalizeSummary(value: unknown): AISummaryResult {
     frequentComplaints: normalizeSummaryField(raw.frequentComplaints),
     planningInsights: normalizeSummaryField(raw.planningInsights),
     globalExpansionNotes: normalizeSummaryField(raw.globalExpansionNotes),
+    issueCategories: normalizeIssueCategories(raw.issueCategories),
   };
+}
+
+function normalizeIssueCategories(value: unknown): AISummaryResult["issueCategories"] {
+  if (!Array.isArray(value)) return [];
+
+  const allowedCategories = new Set([
+    "bugs_stability",
+    "controls",
+    "price_volume",
+    "difficulty",
+    "multiplayer_online",
+    "localization",
+    "content_shortage",
+    "other",
+  ]);
+  const allowedSeverities = new Set(["high", "medium", "low"]);
+
+  return value
+    .map((item) => {
+      const raw = item as Record<string, unknown>;
+      const category = String(raw.category ?? "other");
+      const severity = String(raw.severity ?? "medium");
+      return {
+        category: allowedCategories.has(category) ? (category as AISummaryResult["issueCategories"][number]["category"]) : "other",
+        label: normalizeSummaryField(raw.label) || "その他",
+        severity: allowedSeverities.has(severity) ? (severity as "high" | "medium" | "low") : "medium",
+        mentions: Number.isFinite(Number(raw.mentions)) ? Math.max(0, Math.round(Number(raw.mentions))) : 0,
+        summary: normalizeSummaryField(raw.summary),
+        opportunity: normalizeSummaryField(raw.opportunity),
+      };
+    })
+    .filter((item) => item.summary || item.opportunity)
+    .slice(0, 8);
 }
 
 function safeParseSummary(content: string): AISummaryResult {

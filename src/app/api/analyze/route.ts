@@ -4,6 +4,7 @@ import {
   fetchAppDetails,
   fetchCurrentPlayers,
   fetchLanguageStats,
+  fetchLocalizedAppName,
   fetchRecentSteamPurchaseReviewCount,
   fetchReviewPlaytimeSample,
   fetchReviewSummary,
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
             );
 
             const details = priceResults[0].details;
+            const gameName = await fetchLocalizedAppName(appId, "jp", details.name);
             const editionTemplates = extractEditionPrices(details);
             const editions: EditionInfo[] = editionTemplates.map((template) => {
               const editionPrices: Record<string, CurrencyPriceInfo> = {};
@@ -91,7 +93,6 @@ export async function POST(req: NextRequest) {
 
             const standardEdition = editions.find((edition) => edition.isStandard) || editions[0];
             const prices: Record<string, CurrencyPriceInfo> = standardEdition?.prices ?? {};
-            const gameName = details.name;
 
             send({ type: "progress", appId, appName: gameName, phase: "レビュー概要と言語別集計を取得中..." });
 
