@@ -71,9 +71,10 @@ const SAMPLE_MODE_DESCRIPTIONS: Record<AudienceOverlapSampleMode, string> = {
 function formatShortNumber(n: number): string {
   const rounded = Math.round(n);
   const abs = Math.abs(rounded);
-  if (abs >= 1_000_000_000) return `${(rounded / 1_000_000_000).toFixed(1)}b`;
-  if (abs >= 1_000_000) return `${(rounded / 1_000_000).toFixed(1)}m`;
-  if (abs >= 1_000) return `${(rounded / 1_000).toFixed(1)}k`;
+  const trim = (value: string) => value.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+
+  if (abs >= 100_000_000) return `${trim((rounded / 100_000_000).toFixed(abs >= 1_000_000_000 ? 1 : 2))}億`;
+  if (abs >= 10_000) return `${trim((rounded / 10_000).toFixed(abs >= 1_000_000 ? 1 : 0))}万`;
   return rounded.toLocaleString("ja-JP");
 }
 

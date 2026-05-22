@@ -21,9 +21,10 @@ function formatPercent(value: number): string {
 function formatShortNumber(n: number): string {
   const rounded = Math.round(n);
   const abs = Math.abs(rounded);
-  if (abs >= 1_000_000_000) return `${(rounded / 1_000_000_000).toFixed(1)}b`;
-  if (abs >= 1_000_000) return `${(rounded / 1_000_000).toFixed(1)}m`;
-  if (abs >= 1_000) return `${(rounded / 1_000).toFixed(1)}k`;
+  const trim = (value: string) => value.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+
+  if (abs >= 100_000_000) return `${trim((rounded / 100_000_000).toFixed(abs >= 1_000_000_000 ? 1 : 2))}億`;
+  if (abs >= 10_000) return `${trim((rounded / 10_000).toFixed(abs >= 1_000_000 ? 1 : 0))}万`;
   return rounded.toLocaleString("ja-JP");
 }
 
@@ -33,10 +34,6 @@ function formatEstimateRange(values: SalesEstimate): string {
 
 function formatEstimateRangeFromCases(standard: number, conservative: number, aggressive: number): string {
   return `${formatShortNumber(standard)} (${formatShortNumber(conservative)} - ${formatShortNumber(aggressive)})`;
-}
-
-function formatCurrencyRange(values: SalesEstimate, formatCurrency: (value: number) => string): string {
-  return `${formatCurrency(values.standard)} (${formatCurrency(values.conservative)} - ${formatCurrency(values.aggressive)})`;
 }
 
 function getCountryProxyStats(stats: LanguageStat[]): { label: string; percent: number }[] {
@@ -170,6 +167,14 @@ export default function TitleCard({ data, currency }: Props) {
             <p className="mt-1 text-sm text-slate-200">
               AppID: {data.appId} / {data.releaseDate}
             </p>
+            <a
+              href={`https://store.steampowered.com/app/${data.appId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-flex items-center rounded-md border border-white/30 bg-white/95 px-3 py-1.5 text-xs font-semibold text-slate-900 shadow-sm transition hover:bg-white"
+            >
+              Steamストアで開く
+            </a>
           </div>
         </div>
 
@@ -228,7 +233,12 @@ export default function TitleCard({ data, currency }: Props) {
                   />
                   <StatItem
                     label="推定総売上（ベースゲーム）"
-                    value={formatCurrencyRange(grossRevenue, fp)}
+                    value={
+                      <RangeValue
+                        main={fp(grossRevenue.standard)}
+                        range={`${fp(grossRevenue.conservative)} - ${fp(grossRevenue.aggressive)}`}
+                      />
+                    }
                     note="ベースゲーム売上、Steam手数料控除前"
                     help="推定Steam販売本数にベースゲーム定価と有効販売価格係数を掛けた売上です。セールや地域価格の影響を考慮するため、標準ケースでは定価の60%で計算しています。"
                   />
@@ -498,7 +508,7 @@ function StatItem({
   muted,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   note: string;
   help?: string;
   muted?: boolean;
@@ -512,6 +522,15 @@ function StatItem({
       <p className={`mt-1 text-lg font-bold ${muted ? "text-slate-500" : "text-slate-900"}`}>{value}</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">{note}</p>
     </div>
+  );
+}
+
+function RangeValue({ main, range }: { main: string; range: string }) {
+  return (
+    <span className="block">
+      <span className="block">{main}</span>
+      <span className="mt-0.5 block text-sm font-semibold text-slate-600">({range})</span>
+    </span>
   );
 }
 
