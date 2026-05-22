@@ -7,6 +7,7 @@ import LoadingSpinner from "@/components/LoadingSpinner";
 import TitleCard from "@/components/TitleCard";
 import ComparisonTable from "@/components/ComparisonTable";
 import CurrencySelector from "@/components/CurrencySelector";
+import DiscoveryPanel from "@/components/DiscoveryPanel";
 import { GameAnalysis, SSEEvent } from "@/types";
 import { CurrencyCode } from "@/lib/currency";
 
@@ -171,6 +172,8 @@ export default function Home() {
             ))}
           </div>
         )}
+
+        {!isLoading && results.length === 0 && <DiscoveryPanel onAnalyze={(appId) => handleSubmit([appId])} isLoading={isLoading} />}
 
         {isLoading && <LoadingSpinner progress={progress} />}
 

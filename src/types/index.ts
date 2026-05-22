@@ -250,6 +250,29 @@ export interface AudienceOverlapResponse {
   competitors: AudienceOverlapGame[];
 }
 
+export type DiscoveryMarket = "jp" | "global";
+
+export interface DiscoveryGame {
+  appId: string;
+  name: string;
+  headerImage: string;
+  releaseDate: string;
+  priceText: string;
+  discountText: string | null;
+  sourceRank: number;
+  storeUrl: string;
+  sectionReason: string;
+}
+
+export interface DiscoveryResponse {
+  market: DiscoveryMarket;
+  generatedAt: string;
+  topSellers: DiscoveryGame[];
+  newReleases: DiscoveryGame[];
+  notes: string[];
+  errors?: Partial<Record<"topSellers" | "newReleases", string>>;
+}
+
 export interface PublicReview {
   recommendationid: string;
   language: string;

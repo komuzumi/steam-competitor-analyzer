@@ -1,7 +1,8 @@
-import { LanguageStat, PublicReview, SteamReview } from "@/types";
+import { DiscoveryGame, DiscoveryMarket, LanguageStat, PublicReview, SteamReview } from "@/types";
 
 const STEAM_STORE_API = "https://store.steampowered.com/api";
 const STEAM_REVIEW_API = "https://store.steampowered.com/appreviews";
+const STEAM_SEARCH_URL = "https://store.steampowered.com/search/";
 const STEAM_CURRENT_PLAYERS_API = "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1";
 const STEAM_FETCH_TIMEOUT_MS = 15_000;
 
@@ -237,13 +238,215 @@ export async function fetchLocalizedAppName(
 
 function decodeHtmlEntity(text: string): string {
   return text
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(parseInt(code, 10)))
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+type SteamDiscoveryKind = "top_sellers" | "new_releases";
+
+const DISCOVERY_LIMIT = 12;
+
+const DISCOVERY_MARKETS: Record<DiscoveryMarket, { cc: string; topSellerFilter: string }> = {
+  jp: { cc: "jp", topSellerFilter: "topsellers" },
+  global: { cc: "us", topSellerFilter: "globaltopsellers" },
+};
+
+function getTokyoDateParts(date: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return { year: value("year"), month: value("month"), day: value("day") };
+}
+
+function dateUtcNoon(parts: { year: number; month: number; day: number }): number {
+  return Date.UTC(parts.year, parts.month - 1, parts.day, 12);
+}
+
+function parseSteamReleaseDate(dateText: string): { year: number; month: number; day: number } | null {
+  const text = decodeHtmlEntity(dateText);
+  if (!text || /coming soon|近日|未定|to be announced/i.test(text)) return null;
+
+  const japanese = text.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if (japanese) {
+    return {
+      year: Number(japanese[1]),
+      month: Number(japanese[2]),
+      day: Number(japanese[3]),
+    };
+  }
+
+  const monthNames: Record<string, number> = {
+    jan: 1,
+    january: 1,
+    feb: 2,
+    february: 2,
+    mar: 3,
+    march: 3,
+    apr: 4,
+    april: 4,
+    may: 5,
+    jun: 6,
+    june: 6,
+    jul: 7,
+    july: 7,
+    aug: 8,
+    august: 8,
+    sep: 9,
+    sept: 9,
+    september: 9,
+    oct: 10,
+    october: 10,
+    nov: 11,
+    november: 11,
+    dec: 12,
+    december: 12,
+  };
+
+  const dayFirst = text.match(/^(\d{1,2})\s+([A-Za-z]+),?\s+(\d{4})$/);
+  if (dayFirst) {
+    const month = monthNames[dayFirst[2].toLowerCase()];
+    if (month) return { year: Number(dayFirst[3]), month, day: Number(dayFirst[1]) };
+  }
+
+  const monthFirst = text.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (monthFirst) {
+    const month = monthNames[monthFirst[1].toLowerCase()];
+    if (month) return { year: Number(monthFirst[3]), month, day: Number(monthFirst[2]) };
+  }
+
+  return null;
+}
+
+function stripTags(html: string): string {
+  return decodeHtmlEntity(html.replace(/<[^>]*>/g, " "));
+}
+
+function readAttribute(attrs: string, name: string): string | null {
+  const match = attrs.match(new RegExp(`\\b${name}="([^"]*)"`, "i"));
+  return match ? decodeHtmlEntity(match[1]) : null;
+}
+
+function readClassContent(html: string, className: string): string {
+  const match = html.match(
+    new RegExp(`<[^>]*class="[^"]*\\b${className}\\b[^"]*"[^>]*>([\\s\\S]*?)<\\/[^>]+>`, "i"),
+  );
+  return match ? stripTags(match[1]) : "";
+}
+
+function parseSearchRows(html: string): Omit<DiscoveryGame, "sourceRank" | "sectionReason">[] {
+  const rows: Omit<DiscoveryGame, "sourceRank" | "sectionReason">[] = [];
+  const seen = new Set<string>();
+  const rowPattern = /<a\b(?=[^>]*\bsearch_result_row\b)([^>]*)>([\s\S]*?)<\/a>/gi;
+
+  for (const match of html.matchAll(rowPattern)) {
+    const attrs = match[1];
+    const body = match[2];
+    const appId = readAttribute(attrs, "data-ds-appid")?.split(",")[0] || readAttribute(attrs, "href")?.match(/\/app\/(\d+)/)?.[1];
+    if (!appId || seen.has(appId)) continue;
+
+    const name = readClassContent(body, "title");
+    if (!name) continue;
+
+    const href = readAttribute(attrs, "href") || `https://store.steampowered.com/app/${appId}`;
+    const imageMatch = body.match(/<img[^>]*\bsrc="([^"]+)"/i);
+    const releaseDate = readClassContent(body, "search_released") || "不明";
+    const discountText = readClassContent(body, "discount_pct") || null;
+    const finalPrice = readClassContent(body, "discount_final_price");
+    const regularPrice = readClassContent(body, "search_price");
+    const priceText = finalPrice || regularPrice || "価格不明";
+
+    seen.add(appId);
+    rows.push({
+      appId,
+      name,
+      headerImage: imageMatch ? decodeHtmlEntity(imageMatch[1]) : "",
+      releaseDate,
+      priceText,
+      discountText,
+      storeUrl: href.split("?")[0],
+    });
+  }
+
+  return rows;
+}
+
+function buildDiscoveryUrl(kind: SteamDiscoveryKind, market: DiscoveryMarket, filterOverride?: string): string {
+  const config = DISCOVERY_MARKETS[market];
+  const params = new URLSearchParams({
+    category1: "998",
+    cc: config.cc,
+    l: "japanese",
+    ndl: "1",
+  });
+
+  if (kind === "top_sellers") {
+    params.set("filter", filterOverride ?? config.topSellerFilter);
+  } else {
+    params.set("sort_by", "Released_DESC");
+  }
+
+  return `${STEAM_SEARCH_URL}?${params.toString()}`;
+}
+
+async function fetchDiscoveryRows(kind: SteamDiscoveryKind, market: DiscoveryMarket, filterOverride?: string) {
+  const res = await fetchWithTimeout(buildDiscoveryUrl(kind, market, filterOverride), {
+    next: { revalidate: 300 },
+    headers: {
+      cookie: "birthtime=568022401; mature_content=1",
+    },
+  });
+
+  if (!res.ok) throw new Error(`Steam Search error: ${res.status}`);
+  return parseSearchRows(await res.text());
+}
+
+export async function fetchSteamDiscoveryList(
+  kind: SteamDiscoveryKind,
+  market: DiscoveryMarket,
+): Promise<DiscoveryGame[]> {
+  if (kind === "top_sellers") {
+    let rows = await fetchDiscoveryRows(kind, market);
+    if (market === "global" && rows.length === 0) {
+      rows = await fetchDiscoveryRows(kind, market, "topsellers");
+    }
+    return rows.slice(0, DISCOVERY_LIMIT).map((row, index) => ({
+      ...row,
+      sourceRank: index + 1,
+      sectionReason: `Steamトップセラー #${index + 1}`,
+    }));
+  }
+
+  const rows = await fetchDiscoveryRows(kind, market);
+  const today = dateUtcNoon(getTokyoDateParts(new Date()));
+  const withAge = rows
+    .map((row, index) => {
+      const releaseParts = parseSteamReleaseDate(row.releaseDate);
+      const ageDays = releaseParts == null ? null : Math.floor((today - dateUtcNoon(releaseParts)) / 86_400_000);
+      return { row, index, ageDays };
+    })
+    .filter((entry) => entry.ageDays !== null && entry.ageDays >= 0 && entry.ageDays <= 7);
+
+  const todayRows = withAge.filter((entry) => entry.ageDays === 0);
+  const recentRows = withAge.filter((entry) => entry.ageDays !== 0);
+  const selected = [...todayRows, ...recentRows].slice(0, DISCOVERY_LIMIT);
+
+  return selected.map((entry) => ({
+    ...entry.row,
+    sourceRank: entry.index + 1,
+    sectionReason: entry.ageDays === 0 ? "今日発売" : `直近${entry.ageDays}日の新作`,
+  }));
 }
 
 export async function fetchSteamTags(appId: string): Promise<string[]> {
