@@ -51,10 +51,12 @@ const CLASSIFICATION_DESCRIPTIONS: Record<Exclude<AudienceClassification, "targe
 
 const CLASSIFICATION_ORDER: Exclude<AudienceClassification, "target">[] = [
   "direct_competitor",
+  "fanbase_neighbor",
   "adjacent_genre",
   "surprising_link",
-  "fanbase_neighbor",
 ];
+
+const CLASSIFICATION_FILTER_ORDER: ClassificationFilter[] = ["all", ...CLASSIFICATION_ORDER];
 
 const SAMPLE_MODE_LABELS: Record<AudienceOverlapSampleMode, string> = {
   standard: "標準",
@@ -293,7 +295,7 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
           <ClassificationSummary rows={competitorRows} />
 
           <div className="flex flex-wrap gap-2">
-            {(Object.keys(CLASSIFICATION_LABELS) as ClassificationFilter[]).map((key) => (
+            {CLASSIFICATION_FILTER_ORDER.map((key) => (
               <button
                 key={key}
                 type="button"
@@ -312,7 +314,7 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
           <CompetitiveComparisonTable rows={comparisonRows} currency={currency} />
           <PositioningMap rows={comparisonRows} currency={currency} />
 
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid gap-5">
             <CandidateTable
               title="このゲームのプレイヤーが遊んでいそうなタイトル"
               description="同じ人が両方にレビューしている割合と、タグ/ジャンルの近さを合成した総合スコア順です。"
@@ -338,7 +340,6 @@ export default function AudienceOverlapPanel({ appId, currency }: Props) {
               scoreLabel="サンプル一致"
               scoreAccessor={(row) => row.reviewOverlapPercent}
               currency={currency}
-              className="xl:col-span-2"
               showReviewerOverlapDetail
             />
           </div>
@@ -362,10 +363,7 @@ function ClassificationSummary({ rows }: { rows: AudienceOverlapGame[] }) {
 
   return (
     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-      {(Object.keys(CLASSIFICATION_LABELS).filter((key) => key !== "all") as Exclude<
-        AudienceClassification,
-        "target"
-      >[]).map((key) => (
+      {CLASSIFICATION_ORDER.map((key) => (
         <div key={key} className="rounded-lg border border-slate-200 bg-white p-3">
           <div className="flex items-center gap-2">
             <span
