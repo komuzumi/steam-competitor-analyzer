@@ -92,6 +92,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const geminiApiKey = body.geminiApiKey?.trim();
+    if (!geminiApiKey) {
+      return new Response(
+        JSON.stringify({
+          error: "Gemini APIキーを入力してください。キーはAI分析時だけ送信され、サーバーには保存されません。",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
     const language = body.language || "all";
     const languageLabel = language === "all" ? "全言語" : getLanguageDisplayName(language);
 
@@ -102,7 +115,7 @@ export async function POST(req: NextRequest) {
         REVIEW_FETCH_TIMEOUT_MS,
       );
       const aiSummary = await withTimeout(
-        summarizeReviews(body.gameName, reviews, body.geminiApiKey),
+        summarizeReviews(body.gameName, reviews, geminiApiKey),
         "Gemini分析",
         GEMINI_TIMEOUT_MS,
       );
@@ -129,7 +142,7 @@ export async function POST(req: NextRequest) {
           body.gameName,
           body.corpus,
           `${languageLabel}の全文レビュー圧縮コーパス`,
-          body.geminiApiKey,
+          geminiApiKey,
         ),
         "Gemini分析",
         GEMINI_TIMEOUT_MS,

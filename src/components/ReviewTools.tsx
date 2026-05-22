@@ -565,6 +565,12 @@ export default function ReviewTools({ data }: Props) {
   }
 
   async function handleAiAnalyze() {
+    const normalizedGeminiApiKey = geminiApiKey.trim();
+    if (!normalizedGeminiApiKey) {
+      setAiStatus("Gemini APIキーを入力してください。キーはAI分析時だけ送信され、サーバーには保存されません。");
+      return;
+    }
+
     setIsAnalyzing(true);
     setAiElapsed(0);
     setAiStatus("");
@@ -581,7 +587,7 @@ export default function ReviewTools({ data }: Props) {
         gameName: data.name,
         mode: aiMode,
         language: selectedLanguage,
-        geminiApiKey: geminiApiKey.trim() || undefined,
+        geminiApiKey: normalizedGeminiApiKey,
       };
 
       if (aiMode === "full_compressed") {
@@ -710,16 +716,29 @@ export default function ReviewTools({ data }: Props) {
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[1fr_180px_220px]">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-600">Gemini APIキー</span>
-            <input
-              type="password"
-              value={geminiApiKey}
-              onChange={(event) => setGeminiApiKey(event.target.value)}
-              placeholder="ユーザー側のGemini APIキー（localStorage保存）"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </label>
+          <div>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-slate-600">Gemini APIキー</span>
+              <input
+                type="password"
+                value={geminiApiKey}
+                onChange={(event) => setGeminiApiKey(event.target.value)}
+                placeholder="ユーザー自身のGemini APIキー"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+            <div className="mt-1 flex flex-col gap-1 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <span>このブラウザにのみ保存します。AI分析時だけ送信し、サーバーには保存しません。</span>
+              <button
+                type="button"
+                onClick={() => setGeminiApiKey("")}
+                className="w-fit font-medium text-slate-600 underline-offset-2 hover:text-red-600 hover:underline"
+                disabled={!geminiApiKey || isAnalyzing || isFetchingReviews}
+              >
+                キーを削除
+              </button>
+            </div>
+          </div>
 
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-slate-600">分析対象</span>

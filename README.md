@@ -21,10 +21,10 @@ cp .env.local.example .env.local
 
 利用する環境変数:
 
-- `GEMINI_API_KEY`: 開発用フォールバックです。商用提供時はユーザーが画面で入力したGemini APIキーを優先します。
 - `ITAD_API_KEY`: IsThereAnyDealの過去最安価格取得に使います。未設定でも基本分析は動作します。
 
 DBは使いません。Supabaseなどへの保存処理はありません。
+Gemini APIキーはサーバー環境変数ではなく、利用者が画面で入力します。入力されたキーはブラウザのlocalStorageにのみ保存され、AI分析時だけAPIへ送信されます。
 
 ## 主な機能
 
@@ -79,3 +79,9 @@ DBは使いません。
 - 無料ゲームのベースゲーム売上は信頼度「低」になります。IAP/DLC売上は対象外です。
 - 現在同時接続者数は表示のみです。履歴保存や履歴ベース推定は行いません。
 - 大型タイトルの全文レビュー取得は時間とブラウザメモリを多く使います。
+
+## Cloud Run公開
+
+Cloud Run向けの `Dockerfile` とNext.js standalone設定を含めています。
+
+詳細な公開手順は [docs/deploy-cloud-run.md](docs/deploy-cloud-run.md) を確認してください。

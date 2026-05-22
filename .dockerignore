@@ -1,0 +1,16 @@
+.git
+.claude
+.next
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.env
+.env.*
+!.env.local.example
+coverage
+out
+build
+*.tsbuildinfo
+Dockerfile
+README.md

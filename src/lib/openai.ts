@@ -1,13 +1,13 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AISummaryResult, PublicReview, SteamReview } from "@/types";
 
-function getModel(apiKeyOverride?: string) {
-  const apiKey = apiKeyOverride?.trim() || process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("Gemini APIキーが設定されていません。AI分析パネルでAPIキーを入力してください。");
+function getModel(apiKey: string) {
+  const normalizedApiKey = apiKey.trim();
+  if (!normalizedApiKey) {
+    throw new Error("Gemini APIキーを入力してください。AI分析時だけ送信され、サーバーには保存されません。");
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
+  const genAI = new GoogleGenerativeAI(normalizedApiKey);
   return genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     generationConfig: {
@@ -119,7 +119,7 @@ function safeParseSummary(content: string): AISummaryResult {
 export async function summarizeReviews(
   gameName: string,
   reviews: SteamReview[],
-  apiKey?: string,
+  apiKey: string,
 ): Promise<AISummaryResult> {
   const positiveReviews = reviews.filter((review) => review.voted_up).slice(0, 120);
   const negativeReviews = reviews.filter((review) => !review.voted_up).slice(0, 80);
@@ -137,7 +137,7 @@ export async function summarizeReviewCorpus(
   gameName: string,
   reviewCorpus: string,
   corpusLabel: string,
-  apiKey?: string,
+  apiKey: string,
 ): Promise<AISummaryResult> {
   const model = getModel(apiKey);
   const result = await model.generateContent(buildPrompt(gameName, reviewCorpus, corpusLabel));
