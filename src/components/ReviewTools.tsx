@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AISummaryResult, GameAnalysis, PublicReview } from "@/types";
+import { AISampleMeta, AISummaryResult, GameAnalysis, PublicReview } from "@/types";
 
 type AiMode = "representative" | "full_compressed";
 
@@ -72,6 +72,10 @@ function downloadFromUrl(url: string, filename: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
+}
+
+function safeFilename(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, "_");
 }
 
 function reviewRank(review: PublicReview): number {
@@ -146,6 +150,217 @@ function SummarySection({ title, content }: { title: string; content: string }) 
   );
 }
 
+function IssueCategoryPanel({ summary }: { summary: AISummaryResult }) {
+  if (!summary.issueCategories?.length) return null;
+
+  const severityLabel = {
+    high: "高",
+    medium: "中",
+    low: "低",
+  } as const;
+  const severityClass = {
+    high: "border-red-100 bg-red-50 text-red-700",
+    medium: "border-amber-100 bg-amber-50 text-amber-700",
+    low: "border-slate-100 bg-slate-50 text-slate-700",
+  } as const;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="mb-3">
+        <p className="text-sm font-semibold text-slate-800">レビュー課題カテゴリ</p>
+        <p className="text-xs text-slate-500">AI分析時に、頻出不満をカテゴリ別に整理します。</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {summary.issueCategories.map((category) => (
+          <div key={`${category.category}-${category.label}`} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-medium text-slate-800">{category.label}</p>
+              <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${severityClass[category.severity]}`}>
+                重要度 {severityLabel[category.severity]}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">言及目安: {formatNumber(category.mentions)}件</p>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+              {formatAiReportText(category.summary)}
+            </p>
+            {category.opportunity && (
+              <p className="mt-2 whitespace-pre-wrap rounded-md bg-white p-2 text-xs leading-5 text-slate-600">
+                示唆: {formatAiReportText(category.opportunity)}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function buildPublicReviewSampleMeta({
+  reviews,
+  mode,
+  language,
+  languageLabel,
+}: {
+  reviews: PublicReview[];
+  mode: AiMode;
+  language: string;
+  languageLabel: string;
+}): AISampleMeta {
+  const positiveCount = reviews.filter((review) => review.voted_up).length;
+  const negativeCount = reviews.length - positiveCount;
+  const playtimes = reviews.map((review) => review.playtime_forever).filter((minutes) => minutes > 0);
+  const timestamps = reviews
+    .map((review) => review.timestamp_created)
+    .filter((timestamp) => Number.isFinite(timestamp) && timestamp > 0)
+    .sort((a, b) => a - b);
+  const languageCounts = new Map<string, number>();
+
+  for (const review of reviews) {
+    languageCounts.set(review.language, (languageCounts.get(review.language) ?? 0) + 1);
+  }
+
+  return {
+    mode,
+    language,
+    languageLabel,
+    reviewCount: reviews.length,
+    positiveCount,
+    negativeCount,
+    positiveRate: reviews.length > 0 ? (positiveCount / reviews.length) * 100 : 0,
+    averagePlaytimeHours:
+      playtimes.length > 0 ? playtimes.reduce((sum, minutes) => sum + minutes, 0) / playtimes.length / 60 : null,
+    oldestReviewDate:
+      timestamps.length > 0 ? new Date(timestamps[0] * 1000).toISOString().slice(0, 10) : null,
+    newestReviewDate:
+      timestamps.length > 0 ? new Date(timestamps[timestamps.length - 1] * 1000).toISOString().slice(0, 10) : null,
+    topLanguages: Array.from(languageCounts.entries())
+      .map(([reviewLanguage, count]) => ({ language: reviewLanguage, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5),
+    selectionRule:
+      mode === "representative"
+        ? "直近365日のレビューから、好評/不評を混ぜて最大200件を抽出。weighted_vote_score、参考票数、投稿日時を優先します。"
+        : "このページで一時取得した全文レビューを圧縮し、好評/不評/直近レビューを混ぜてAIに渡します。",
+  };
+}
+
+function AiSampleMetaPanel({ meta }: { meta: AISampleMeta }) {
+  const period =
+    meta.oldestReviewDate && meta.newestReviewDate ? `${meta.oldestReviewDate} - ${meta.newestReviewDate}` : "-";
+  const playtime = meta.averagePlaytimeHours == null ? "-" : `${meta.averagePlaytimeHours.toFixed(1)}h`;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="font-semibold text-slate-800">AI分析サンプル</p>
+          <p className="text-xs text-slate-500">{meta.selectionRule}</p>
+        </div>
+        <span className="w-fit rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+          {meta.mode === "representative" ? "代表200件" : "全文圧縮"}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <p className="text-xs text-slate-500">対象</p>
+          <p className="font-medium text-slate-800">{meta.languageLabel}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">サンプル数</p>
+          <p className="font-medium text-slate-800">{formatNumber(meta.reviewCount)}件</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">好評/不評</p>
+          <p className="font-medium text-slate-800">
+            {formatNumber(meta.positiveCount)} / {formatNumber(meta.negativeCount)} ({meta.positiveRate.toFixed(1)}%)
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">平均プレイ時間</p>
+          <p className="font-medium text-slate-800">{playtime}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">投稿期間</p>
+          <p className="font-medium text-slate-800">{period}</p>
+        </div>
+        <div className="sm:col-span-2 lg:col-span-3">
+          <p className="text-xs text-slate-500">言語内訳</p>
+          <p className="font-medium text-slate-800">
+            {meta.topLanguages.length > 0
+              ? meta.topLanguages
+                  .map((item) => `${item.language}: ${formatNumber(item.count)}件`)
+                  .join(" / ")
+              : "-"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildAiSummaryMarkdown({
+  gameName,
+  appId,
+  languageLabel,
+  aiMode,
+  summary,
+  sampleMeta,
+}: {
+  gameName: string;
+  appId: string;
+  languageLabel: string;
+  aiMode: AiMode;
+  summary: AISummaryResult;
+  sampleMeta?: AISampleMeta | null;
+}): string {
+  const sampleLines = sampleMeta
+    ? [
+        `- サンプル数: ${sampleMeta.reviewCount}`,
+        `- サンプル好評/不評: ${sampleMeta.positiveCount} / ${sampleMeta.negativeCount} (${sampleMeta.positiveRate.toFixed(1)}%)`,
+        `- サンプル投稿期間: ${sampleMeta.oldestReviewDate ?? "-"} - ${sampleMeta.newestReviewDate ?? "-"}`,
+        `- サンプル平均プレイ時間: ${
+          sampleMeta.averagePlaytimeHours == null ? "-" : `${sampleMeta.averagePlaytimeHours.toFixed(1)}h`
+        }`,
+        `- サンプル抽出ルール: ${sampleMeta.selectionRule}`,
+      ]
+    : [];
+
+  return [
+    `# AIレビュー分析レポート: ${gameName}`,
+    "",
+    `- AppID: ${appId}`,
+    `- 分析対象: ${languageLabel}`,
+    `- AIモード: ${aiMode === "representative" ? "代表200件" : "全文圧縮"}`,
+    `- 生成日時: ${new Date().toLocaleString("ja-JP")}`,
+    ...sampleLines,
+    "",
+    "## 高評価の理由",
+    formatAiReportText(summary.positiveReasons),
+    "",
+    "## 低評価の理由",
+    formatAiReportText(summary.negativeReasons),
+    "",
+    "## 頻出する不満",
+    formatAiReportText(summary.frequentComplaints),
+    "",
+    "## 企画に活かせる示唆",
+    formatAiReportText(summary.planningInsights),
+    "",
+    "## 海外展開時の注意点",
+    formatAiReportText(summary.globalExpansionNotes),
+    "",
+    "## レビュー課題カテゴリ",
+    ...(summary.issueCategories?.length
+      ? summary.issueCategories.flatMap((category) => [
+          `### ${category.label}（重要度: ${category.severity} / 言及目安: ${category.mentions}件）`,
+          formatAiReportText(category.summary),
+          `示唆: ${formatAiReportText(category.opportunity)}`,
+          "",
+        ])
+      : ["- なし", ""]),
+  ].join("\n");
+}
+
 function getPlaytimeBucket(minutes: number): string {
   const hours = minutes / 60;
   if (hours < 1) return "<1h";
@@ -157,7 +372,7 @@ function getPlaytimeBucket(minutes: number): string {
   return "100h+";
 }
 
-function PlaytimeSentimentChart({ reviews }: { reviews: PublicReview[] }) {
+function PlaytimeSentimentChart({ reviews, scopeLabel }: { reviews: PublicReview[]; scopeLabel: string }) {
   const buckets = useMemo(() => {
     const order = ["<1h", "1-5h", "5-10h", "10-20h", "20-50h", "50-100h", "100h+"];
     const map = new Map(order.map((bucket) => [bucket, { bucket, positive: 0, negative: 0, total: 0 }]));
@@ -178,7 +393,9 @@ function PlaytimeSentimentChart({ reviews }: { reviews: PublicReview[] }) {
     <div className="rounded-lg border border-slate-200 bg-white p-3">
       <div className="mb-3">
         <p className="text-sm font-semibold text-slate-800">プレイ時間別 好評/不評</p>
-        <p className="text-xs text-slate-500">全文レビュー取得後の一時データだけで集計します。</p>
+        <p className="text-xs text-slate-500">
+          {scopeLabel}の一時レビュー{formatNumber(reviews.length)}件だけで集計します。
+        </p>
       </div>
       <div className="space-y-2">
         {buckets.map((bucket) => {
@@ -220,6 +437,8 @@ export default function ReviewTools({ data }: Props) {
   const [isFetchingReviews, setIsFetchingReviews] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [csvStatus, setCsvStatus] = useState<string>("");
+  const [aiExportStatus, setAiExportStatus] = useState<string>("");
+  const [aiSampleMeta, setAiSampleMeta] = useState<AISampleMeta | null>(null);
   const inFlightFullFetch = useRef<Partial<Record<string, Promise<PublicReview[]>>>>({});
 
   useEffect(() => {
@@ -250,6 +469,21 @@ export default function ReviewTools({ data }: Props) {
     languageOptions.find((option) => option.value === selectedLanguage)?.label ?? selectedLanguage;
   const allReviewCache = reviewCaches.all;
   const activeReviewCache = reviewCaches[selectedLanguage];
+  const visibleReviewCache = useMemo(() => {
+    if (activeReviewCache) return activeReviewCache;
+    if (selectedLanguage !== "all" && allReviewCache) {
+      return allReviewCache.filter((review) => review.language === selectedLanguage);
+    }
+    return allReviewCache;
+  }, [activeReviewCache, allReviewCache, selectedLanguage]);
+  const visibleReviewCacheLabel = selectedLanguage === "all" ? "全言語" : selectedLanguageLabel;
+  const cacheStatus =
+    selectedLanguage !== "all" && visibleReviewCache
+      ? `${visibleReviewCacheLabel} ${formatNumber(visibleReviewCache.length)}件`
+      : allReviewCache
+        ? `全言語 ${formatNumber(allReviewCache.length)}件`
+        : "未取得";
+  const reviewFilenameSuffix = selectedLanguage === "all" ? "reviews" : `${selectedLanguage}-reviews`;
   const visibleAiStatus = isAnalyzing && aiStatus ? `${aiStatus}（${aiElapsed}秒経過）` : aiStatus;
 
   async function fetchFullReviews(language: string): Promise<PublicReview[]> {
@@ -325,30 +559,46 @@ export default function ReviewTools({ data }: Props) {
       return await promise;
     } finally {
       setIsFetchingReviews(false);
+      setFetchProgress(null);
       delete inFlightFullFetch.current[language];
     }
   }
 
   async function handleAiAnalyze() {
+    const normalizedGeminiApiKey = geminiApiKey.trim();
+    if (!normalizedGeminiApiKey) {
+      setAiStatus("Gemini APIキーを入力してください。キーはAI分析時だけ送信され、サーバーには保存されません。");
+      return;
+    }
+
     setIsAnalyzing(true);
     setAiElapsed(0);
     setAiStatus("");
+    setAiExportStatus("");
+    setAiSampleMeta(null);
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
 
     try {
+      let localSampleMeta: AISampleMeta | null = null;
       let body: Record<string, unknown> = {
         appId: data.appId,
         gameName: data.name,
         mode: aiMode,
         language: selectedLanguage,
-        geminiApiKey: geminiApiKey.trim() || undefined,
+        geminiApiKey: normalizedGeminiApiKey,
       };
 
       if (aiMode === "full_compressed") {
         setAiStatus(`${selectedLanguageLabel}の全文レビューを取得中...`);
         const reviews = await fetchFullReviews(selectedLanguage);
+        localSampleMeta = buildPublicReviewSampleMeta({
+          reviews,
+          mode: aiMode,
+          language: selectedLanguage,
+          languageLabel: selectedLanguageLabel,
+        });
         setAiStatus(`${selectedLanguageLabel}の全文レビューを圧縮してGeminiで分析中...`);
         body = {
           ...body,
@@ -369,6 +619,7 @@ export default function ReviewTools({ data }: Props) {
       if (!res.ok) throw new Error(payload.error || "AI分析に失敗しました");
 
       setAiSummary(payload.aiSummary as AISummaryResult);
+      setAiSampleMeta((payload.sampleMeta as AISampleMeta | undefined) ?? localSampleMeta);
       setAiStatus(
         aiMode === "representative"
           ? `${selectedLanguageLabel}の代表レビューで分析しました`
@@ -389,22 +640,66 @@ export default function ReviewTools({ data }: Props) {
   async function handleCsvDownload() {
     setCsvStatus("");
     try {
-      if (!allReviewCache) {
-        const params = new URLSearchParams({ appId: data.appId, name: data.name });
+      if (!visibleReviewCache) {
+        const params = new URLSearchParams({ appId: data.appId, name: data.name, language: selectedLanguage });
         downloadFromUrl(
           `/api/reviews/csv?${params}`,
-          `${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`,
+          `${data.appId}-${safeFilename(data.name)}-${reviewFilenameSuffix}.csv`,
         );
-        setCsvStatus("CSVダウンロードを開始しました。未取得の場合はサーバーから直接生成します。");
+        setCsvStatus(`${visibleReviewCacheLabel}のCSVダウンロードを開始しました。未取得のためサーバーから直接生成します。`);
         return;
       }
 
-      const csv = makeCsv(allReviewCache);
-      downloadText(`${data.appId}-${data.name.replace(/[\\/:*?"<>|]/g, "_")}-reviews.csv`, csv, "text/csv;charset=utf-8");
-      setCsvStatus("ページ内の一時レビューからCSVを生成しました");
+      const csv = makeCsv(visibleReviewCache);
+      downloadText(
+        `${data.appId}-${safeFilename(data.name)}-${reviewFilenameSuffix}.csv`,
+        csv,
+        "text/csv;charset=utf-8",
+      );
+      setCsvStatus(
+        `${visibleReviewCacheLabel}のページ内一時レビュー${formatNumber(visibleReviewCache.length)}件からCSVを生成しました`,
+      );
     } catch (err) {
       setCsvStatus(err instanceof Error ? err.message : "CSV生成に失敗しました");
     }
+  }
+
+  async function handleCopyAiReport() {
+    if (!aiSummary) return;
+    const markdown = buildAiSummaryMarkdown({
+      gameName: data.name,
+      appId: data.appId,
+      languageLabel: aiSampleMeta?.languageLabel ?? selectedLanguageLabel,
+      aiMode: aiSampleMeta?.mode ?? aiMode,
+      summary: aiSummary,
+      sampleMeta: aiSampleMeta,
+    });
+
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setAiExportStatus("AIレポートをコピーしました");
+    } catch {
+      setAiExportStatus("クリップボードへのコピーに失敗しました");
+    }
+  }
+
+  function handleDownloadAiReport() {
+    if (!aiSummary) return;
+    const markdown = buildAiSummaryMarkdown({
+      gameName: data.name,
+      appId: data.appId,
+      languageLabel: aiSampleMeta?.languageLabel ?? selectedLanguageLabel,
+      aiMode: aiSampleMeta?.mode ?? aiMode,
+      summary: aiSummary,
+      sampleMeta: aiSampleMeta,
+    });
+
+    downloadText(
+      `${data.appId}-${safeFilename(data.name)}-${aiSampleMeta?.language ?? selectedLanguage}-ai-report.md`,
+      markdown,
+      "text/markdown;charset=utf-8",
+    );
+    setAiExportStatus("AIレポートのMarkdown保存を開始しました");
   }
 
   return (
@@ -416,21 +711,34 @@ export default function ReviewTools({ data }: Props) {
             <p className="text-xs text-slate-500">レビュー本文はDB保存せず、このページのメモリ内だけで一時保持します。</p>
           </div>
           <div className="text-xs text-slate-500">
-            全文キャッシュ: {allReviewCache ? `${formatNumber(allReviewCache.length)}件` : "未取得"}
+            全文キャッシュ: {cacheStatus}
           </div>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[1fr_180px_220px]">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-600">Gemini APIキー</span>
-            <input
-              type="password"
-              value={geminiApiKey}
-              onChange={(event) => setGeminiApiKey(event.target.value)}
-              placeholder="ユーザー側のGemini APIキー（localStorage保存）"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </label>
+          <div>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-slate-600">Gemini APIキー</span>
+              <input
+                type="password"
+                value={geminiApiKey}
+                onChange={(event) => setGeminiApiKey(event.target.value)}
+                placeholder="ユーザー自身のGemini APIキー"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+            <div className="mt-1 flex flex-col gap-1 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <span>このブラウザにのみ保存します。AI分析時だけ送信し、サーバーには保存しません。</span>
+              <button
+                type="button"
+                onClick={() => setGeminiApiKey("")}
+                className="w-fit font-medium text-slate-600 underline-offset-2 hover:text-red-600 hover:underline"
+                disabled={!geminiApiKey || isAnalyzing || isFetchingReviews}
+              >
+                キーを削除
+              </button>
+            </div>
+          </div>
 
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-slate-600">分析対象</span>
@@ -494,11 +802,11 @@ export default function ReviewTools({ data }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => fetchFullReviews("all").catch((err) => setCsvStatus(err.message))}
+            onClick={() => fetchFullReviews(selectedLanguage).catch((err) => setCsvStatus(err.message))}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={isAnalyzing || isFetchingReviews}
           >
-            {isFetchingReviews ? "取得中..." : "全文レビュー取得"}
+            {isFetchingReviews ? "取得中..." : "選択対象の全文レビュー取得"}
           </button>
           <button
             type="button"
@@ -516,22 +824,50 @@ export default function ReviewTools({ data }: Props) {
               {selectedLanguageLabel}: {formatNumber(activeReviewCache.length)}件をページ内に一時保持中
             </p>
           )}
+          {!activeReviewCache && selectedLanguage !== "all" && visibleReviewCache && (
+            <p>
+              {selectedLanguageLabel}: 全言語キャッシュから{formatNumber(visibleReviewCache.length)}件を表示中
+            </p>
+          )}
           {fetchProgress && (
             <p>
               全文取得: {formatNumber(fetchProgress.fetched)} / {formatNumber(fetchProgress.total)}件
             </p>
           )}
           {visibleAiStatus && <p className="text-blue-700">{visibleAiStatus}</p>}
+          {aiExportStatus && <p className="text-blue-700">{aiExportStatus}</p>}
           {csvStatus && <p className="text-blue-700">{csvStatus}</p>}
         </div>
       </div>
 
-      {allReviewCache && <PlaytimeSentimentChart reviews={allReviewCache} />}
+      {visibleReviewCache && visibleReviewCache.length > 0 && (
+        <PlaytimeSentimentChart reviews={visibleReviewCache} scopeLabel={visibleReviewCacheLabel} />
+      )}
 
       {aiSummary && (
         <div>
-          <h4 className="mb-2 font-semibold text-slate-900">AI分析レポート</h4>
+          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h4 className="font-semibold text-slate-900">AI分析レポート</h4>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleCopyAiReport}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                AIレポートをコピー
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadAiReport}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                Markdown保存
+              </button>
+            </div>
+          </div>
           <div className="space-y-3">
+            {aiSampleMeta && <AiSampleMetaPanel meta={aiSampleMeta} />}
+            <IssueCategoryPanel summary={aiSummary} />
             <SummarySection title="高評価の理由" content={aiSummary.positiveReasons} />
             <SummarySection title="低評価の理由" content={aiSummary.negativeReasons} />
             <SummarySection title="頻出する不満" content={aiSummary.frequentComplaints} />

@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import Link from "next/link";
 import InputForm from "@/components/InputForm";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import TitleCard from "@/components/TitleCard";
 import ComparisonTable from "@/components/ComparisonTable";
-import MarkdownExport from "@/components/MarkdownExport";
 import CurrencySelector from "@/components/CurrencySelector";
+import DiscoveryPanel from "@/components/DiscoveryPanel";
 import { GameAnalysis, SSEEvent } from "@/types";
 import { CurrencyCode } from "@/lib/currency";
 
@@ -144,6 +145,12 @@ export default function Home() {
             Steam公開情報をもとに、価格、レビュー、言語構成、推定販売本数、推定売上、現在同時接続者数を分析します。
             AI分析と全文CSVは必要な時だけ実行します。
           </p>
+          <Link
+            href="/methodology"
+            className="mt-4 inline-flex rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-blue-700 shadow-sm transition-colors hover:bg-blue-50"
+          >
+            販売本数・売上推定ロジックを見る
+          </Link>
         </div>
 
         <InputForm onSubmit={handleSubmit} isLoading={isLoading} />
@@ -166,6 +173,8 @@ export default function Home() {
           </div>
         )}
 
+        {!isLoading && results.length === 0 && <DiscoveryPanel onAnalyze={(appId) => handleSubmit([appId])} isLoading={isLoading} />}
+
         {isLoading && <LoadingSpinner progress={progress} />}
 
         {results.length > 0 && (
@@ -179,8 +188,6 @@ export default function Home() {
             {results.map((result) => (
               <TitleCard key={result.appId} data={result} currency={currency} />
             ))}
-
-            {!isLoading && <MarkdownExport results={results} currency={currency} />}
           </div>
         )}
       </div>

@@ -1,13 +1,13 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AISummaryResult, PublicReview, SteamReview } from "@/types";
 
-function getModel(apiKeyOverride?: string) {
-  const apiKey = apiKeyOverride?.trim() || process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("Gemini APIキーが設定されていません。AI分析パネルでAPIキーを入力してください。");
+function getModel(apiKey: string) {
+  const normalizedApiKey = apiKey.trim();
+  if (!normalizedApiKey) {
+    throw new Error("Gemini APIキーを入力してください。AI分析時だけ送信され、サーバーには保存されません。");
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
+  const genAI = new GoogleGenerativeAI(normalizedApiKey);
   return genAI.getGenerativeModel({
     model: "gemini-2.5-flash",
     generationConfig: {
@@ -40,7 +40,17 @@ ${reviewCorpus}
   "negativeReasons": "低評価の主な理由。箇条書きで3-5点。",
   "frequentComplaints": "頻出する不満点。箇条書きで3-5点。",
   "planningInsights": "ゲーム企画・改善に活かせる示唆。箇条書きで3-5点。",
-  "globalExpansionNotes": "海外展開・ローカライズ面の注意点。箇条書きで3-5点。"
+  "globalExpansionNotes": "海外展開・ローカライズ面の注意点。箇条書きで3-5点。",
+  "issueCategories": [
+    {
+      "category": "bugs_stability | controls | price_volume | difficulty | multiplayer_online | localization | content_shortage | other",
+      "label": "日本語カテゴリ名",
+      "severity": "high | medium | low",
+      "mentions": 0,
+      "summary": "このカテゴリの不満傾向を1-2文で要約",
+      "opportunity": "企画・改善に活かせる具体的な示唆"
+    }
+  ]
 }`;
 }
 
@@ -59,7 +69,41 @@ function normalizeSummary(value: unknown): AISummaryResult {
     frequentComplaints: normalizeSummaryField(raw.frequentComplaints),
     planningInsights: normalizeSummaryField(raw.planningInsights),
     globalExpansionNotes: normalizeSummaryField(raw.globalExpansionNotes),
+    issueCategories: normalizeIssueCategories(raw.issueCategories),
   };
+}
+
+function normalizeIssueCategories(value: unknown): AISummaryResult["issueCategories"] {
+  if (!Array.isArray(value)) return [];
+
+  const allowedCategories = new Set([
+    "bugs_stability",
+    "controls",
+    "price_volume",
+    "difficulty",
+    "multiplayer_online",
+    "localization",
+    "content_shortage",
+    "other",
+  ]);
+  const allowedSeverities = new Set(["high", "medium", "low"]);
+
+  return value
+    .map((item) => {
+      const raw = item as Record<string, unknown>;
+      const category = String(raw.category ?? "other");
+      const severity = String(raw.severity ?? "medium");
+      return {
+        category: allowedCategories.has(category) ? (category as AISummaryResult["issueCategories"][number]["category"]) : "other",
+        label: normalizeSummaryField(raw.label) || "その他",
+        severity: allowedSeverities.has(severity) ? (severity as "high" | "medium" | "low") : "medium",
+        mentions: Number.isFinite(Number(raw.mentions)) ? Math.max(0, Math.round(Number(raw.mentions))) : 0,
+        summary: normalizeSummaryField(raw.summary),
+        opportunity: normalizeSummaryField(raw.opportunity),
+      };
+    })
+    .filter((item) => item.summary || item.opportunity)
+    .slice(0, 8);
 }
 
 function safeParseSummary(content: string): AISummaryResult {
@@ -75,7 +119,7 @@ function safeParseSummary(content: string): AISummaryResult {
 export async function summarizeReviews(
   gameName: string,
   reviews: SteamReview[],
-  apiKey?: string,
+  apiKey: string,
 ): Promise<AISummaryResult> {
   const positiveReviews = reviews.filter((review) => review.voted_up).slice(0, 120);
   const negativeReviews = reviews.filter((review) => !review.voted_up).slice(0, 80);
@@ -93,7 +137,7 @@ export async function summarizeReviewCorpus(
   gameName: string,
   reviewCorpus: string,
   corpusLabel: string,
-  apiKey?: string,
+  apiKey: string,
 ): Promise<AISummaryResult> {
   const model = getModel(apiKey);
   const result = await model.generateContent(buildPrompt(gameName, reviewCorpus, corpusLabel));

@@ -5,8 +5,10 @@ import type { ReactNode } from "react";
 import { GameAnalysis, LanguageStat, SalesEstimate } from "@/types";
 import { CurrencyCode, formatPrice } from "@/lib/currency";
 import { estimateNetRevenue, estimateRevenue } from "@/lib/sales";
+import { formatConfidenceLabel } from "@/lib/labels";
 import LanguageChart from "@/components/LanguageChart";
 import ReviewTools from "@/components/ReviewTools";
+import AudienceOverlapPanel from "@/components/AudienceOverlapPanel";
 
 function formatNumber(n: number): string {
   return Math.round(n).toLocaleString("ja-JP");
@@ -19,9 +21,10 @@ function formatPercent(value: number): string {
 function formatShortNumber(n: number): string {
   const rounded = Math.round(n);
   const abs = Math.abs(rounded);
-  if (abs >= 1_000_000_000) return `${(rounded / 1_000_000_000).toFixed(1)}b`;
-  if (abs >= 1_000_000) return `${(rounded / 1_000_000).toFixed(1)}m`;
-  if (abs >= 1_000) return `${(rounded / 1_000).toFixed(1)}k`;
+  const trim = (value: string) => value.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+
+  if (abs >= 100_000_000) return `${trim((rounded / 100_000_000).toFixed(abs >= 1_000_000_000 ? 1 : 2))}億`;
+  if (abs >= 10_000) return `${trim((rounded / 10_000).toFixed(abs >= 1_000_000 ? 1 : 0))}万`;
   return rounded.toLocaleString("ja-JP");
 }
 
@@ -31,10 +34,6 @@ function formatEstimateRange(values: SalesEstimate): string {
 
 function formatEstimateRangeFromCases(standard: number, conservative: number, aggressive: number): string {
   return `${formatShortNumber(standard)} (${formatShortNumber(conservative)} - ${formatShortNumber(aggressive)})`;
-}
-
-function formatCurrencyRange(values: SalesEstimate, formatCurrency: (value: number) => string): string {
-  return `${formatCurrency(values.standard)} (${formatCurrency(values.conservative)} - ${formatCurrency(values.aggressive)})`;
 }
 
 function getCountryProxyStats(stats: LanguageStat[]): { label: string; percent: number }[] {
@@ -62,6 +61,74 @@ function getCountryProxyStats(stats: LanguageStat[]): { label: string; percent: 
   ];
 }
 
+interface LanguageInsight {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "good" | "warn" | "neutral";
+}
+
+function getLanguageRate(stat: LanguageStat): number {
+  return stat.count > 0 ? (stat.positive / stat.count) * 100 : 0;
+}
+
+function getLanguageInsights(stats: LanguageStat[], totalReviews: number, globalPositiveRate: number): LanguageInsight[] {
+  const rows = stats
+    .filter((stat) => stat.language !== "other" && stat.count > 0)
+    .map((stat) => ({
+      ...stat,
+      rate: getLanguageRate(stat),
+      share: totalReviews > 0 ? (stat.count / totalReviews) * 100 : 0,
+      name: stat.displayName ?? stat.language,
+    }));
+
+  if (!rows.length) {
+    return [{ label: "言語別傾向", value: "データ不足", detail: "言語別レビュー集計を取得できませんでした。" }];
+  }
+
+  const significantThreshold = Math.max(100, totalReviews * 0.01);
+  const significantRows = rows.filter((row) => row.count >= significantThreshold);
+  const trendRows = significantRows.length ? significantRows : rows;
+  const primary = rows[0];
+  const highest = [...trendRows].sort((a, b) => b.rate - a.rate || b.count - a.count)[0];
+  const lowest = [...trendRows].sort((a, b) => a.rate - b.rate || b.count - a.count)[0];
+  const underperforming = trendRows
+    .filter((row) => row.rate <= globalPositiveRate - 5)
+    .sort((a, b) => a.rate - b.rate)
+    .slice(0, 3);
+  const top3Share = rows.slice(0, 3).reduce((sum, row) => sum + row.share, 0);
+
+  return [
+    {
+      label: "最大言語市場",
+      value: primary.name,
+      detail: `${formatShortNumber(primary.count)}件 / 構成比${formatPercent(primary.share)} / 好評率${formatPercent(primary.rate)}`,
+    },
+    {
+      label: "低評価リスク",
+      value: lowest.name,
+      detail: `${formatShortNumber(lowest.count)}件以上の言語で最低好評率: ${formatPercent(lowest.rate)}`,
+      tone: lowest.rate <= globalPositiveRate - 5 ? "warn" : "neutral",
+    },
+    {
+      label: "高評価が強い言語",
+      value: highest.name,
+      detail: `${formatShortNumber(highest.count)}件 / 好評率${formatPercent(highest.rate)}`,
+      tone: "good",
+    },
+    {
+      label: "優先確認候補",
+      value: underperforming.length ? underperforming.map((row) => row.name).join(" / ") : "大きな乖離なし",
+      detail: underperforming.length
+        ? `全体好評率より5pt以上低い言語: ${underperforming
+            .map((row) => `${row.name} ${formatPercent(row.rate)}`)
+            .join(", ")}`
+        : `上位3言語の構成比は${formatPercent(top3Share)}です。大きな低評価ギャップはありません。`,
+      tone: underperforming.length ? "warn" : "good",
+    },
+  ];
+}
+
 function formatRecentSalesNote(data: GameAnalysis): string {
   const estimate = data.recentSalesEstimate;
   if (!estimate) return "直近レビュー取得に失敗";
@@ -78,7 +145,7 @@ interface Props {
   currency: CurrencyCode;
 }
 
-type Tab = "overview" | "estimate" | "reviews" | "ai";
+type Tab = "overview" | "estimate" | "reviews" | "audience" | "ai";
 
 export default function TitleCard({ data, currency }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
@@ -100,6 +167,14 @@ export default function TitleCard({ data, currency }: Props) {
             <p className="mt-1 text-sm text-slate-200">
               AppID: {data.appId} / {data.releaseDate}
             </p>
+            <a
+              href={`https://store.steampowered.com/app/${data.appId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-flex items-center rounded-md border border-white/30 bg-white/95 px-3 py-1.5 text-xs font-semibold text-slate-900 shadow-sm transition hover:bg-white"
+            >
+              Steamストアで開く
+            </a>
           </div>
         </div>
 
@@ -112,7 +187,11 @@ export default function TitleCard({ data, currency }: Props) {
             <Metric label="レビュー数" value={formatNumber(data.totalReviews)} />
             <Metric label="好評率" value={formatPercent(data.positiveRate)} color="text-green-600" />
             <Metric label="現在同時接続者" value={data.currentPlayers == null ? "取得不可" : formatNumber(data.currentPlayers)} />
-            <Metric label="推定信頼度" value={data.marketEstimate.confidence} color={confidenceColor(data.marketEstimate.confidence)} />
+            <Metric
+              label="推定信頼度"
+              value={formatConfidenceLabel(data.marketEstimate.confidence)}
+              color={confidenceColor(data.marketEstimate.confidence)}
+            />
           </div>
         </div>
       </div>
@@ -122,8 +201,9 @@ export default function TitleCard({ data, currency }: Props) {
           {[
             ["overview", "概要"],
             ["estimate", "売上推定"],
-            ["reviews", "レビュー/言語"],
-            ["ai", "AI/CSV"],
+            ["reviews", "言語分布"],
+            ["audience", "競合分析"],
+            ["ai", "AI分析/レビュー本文出力"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -143,22 +223,27 @@ export default function TitleCard({ data, currency }: Props) {
         <div className="p-5">
           {tab === "overview" && (
             <div className="space-y-5">
-              <Panel title="Stats">
+              <Panel title="統計サマリー">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   <StatItem
-                    label="Copies sold"
+                    label="推定Steam販売本数"
                     value={formatEstimateRange(data.salesEstimate)}
                     note="Steam直接販売本数の推定"
                     help="Steam購入レビュー数とレビュー倍率から推定した、Steamストア上で販売された本数です。括弧内は保守・強気の推定レンジです。キー配布やバンドル由来の所有者は別枠として扱います。"
                   />
                   <StatItem
-                    label="Gross revenue (base game)"
-                    value={formatCurrencyRange(grossRevenue, fp)}
+                    label="推定総売上（ベースゲーム）"
+                    value={
+                      <RangeValue
+                        main={fp(grossRevenue.standard)}
+                        range={`${fp(grossRevenue.conservative)} - ${fp(grossRevenue.aggressive)}`}
+                      />
+                    }
                     note="ベースゲーム売上、Steam手数料控除前"
                     help="推定Steam販売本数にベースゲーム定価と有効販売価格係数を掛けた売上です。セールや地域価格の影響を考慮するため、標準ケースでは定価の60%で計算しています。"
                   />
                   <StatItem
-                    label="Owners"
+                    label="推定所有者"
                     value={formatEstimateRangeFromCases(
                       data.marketEstimate.standard.ownersEstimate,
                       data.marketEstimate.conservative.ownersEstimate,
@@ -168,13 +253,13 @@ export default function TitleCard({ data, currency }: Props) {
                     help="総レビュー数に、発売年・価格帯・好評率・平均プレイ時間で補正したレビュー倍率を掛けた推定所有者数です。実プレイ人数の公開データはないため、プレイヤー総数の近似としても扱います。厳密なユニークプレイヤー数ではありません。"
                   />
                   <StatItem
-                    label="Average playtime"
+                    label="平均プレイ時間"
                     value={averagePlaytimeHours == null ? "取得不可" : `${averagePlaytimeHours.toFixed(1)}h`}
                     note="レビュー投稿者サンプルから算出"
                     help="SteamレビューAPIから取得したレビュー投稿者サンプルの総プレイ時間平均です。全ユーザー平均ではありませんが、レビュー倍率補正の参考値として使います。"
                   />
                   <StatItem
-                    label="Copies sold in the last 7 days"
+                    label="直近7日の推定販売本数"
                     value={
                       data.recentSalesEstimate
                         ? `${data.recentSalesEstimate.isReviewCountCapped ? ">= " : ""}${formatEstimateRange(
@@ -190,7 +275,7 @@ export default function TitleCard({ data, currency }: Props) {
                 <div className="mt-5 rounded-lg bg-slate-50 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-1.5">
-                      <p className="text-sm font-semibold text-slate-800">Players by country</p>
+                      <p className="text-sm font-semibold text-slate-800">国別プレイヤー比率（推定）</p>
                       <HelpTooltip text="Steamから国別プレイヤーの実測値は取得できないため、レビュー言語を国・地域の簡易プロキシとして表示しています。USは英語、CNは簡体字/繁体字中国語、RUはロシア語レビューを近似として扱います。" />
                     </div>
                     <p className="text-xs text-slate-500">レビュー言語ベースの簡易プロキシ</p>
@@ -334,7 +419,7 @@ export default function TitleCard({ data, currency }: Props) {
                     label="Steam購入レビュー比率"
                     value={`${(data.marketEstimate.explanation.steamPurchaseReviewShare * 100).toFixed(1)}%`}
                   />
-                  <LogicRow label="信頼度" value={data.marketEstimate.confidence} />
+                  <LogicRow label="信頼度" value={formatConfidenceLabel(data.marketEstimate.confidence)} />
                 </div>
                 <div className="mt-4 rounded-lg bg-slate-50 p-3">
                   <p className="text-xs font-semibold text-slate-700">使用データ</p>
@@ -354,6 +439,11 @@ export default function TitleCard({ data, currency }: Props) {
 
           {tab === "reviews" && (
             <div className="space-y-5">
+              <LanguageTrendSummary
+                stats={data.languageStats}
+                totalReviews={data.totalReviews}
+                positiveRate={data.positiveRate}
+              />
               <LanguageChart stats={data.languageStats} />
               {data.languageStats.length > 0 && (
                 <Panel title="言語別レビュー詳細">
@@ -389,7 +479,12 @@ export default function TitleCard({ data, currency }: Props) {
             </div>
           )}
 
-          {tab === "ai" && <ReviewTools data={data} />}
+          <div className={tab === "ai" ? "" : "hidden"}>
+            <ReviewTools data={data} />
+          </div>
+          <div className={tab === "audience" ? "" : "hidden"}>
+            <AudienceOverlapPanel appId={data.appId} currency={currency} />
+          </div>
         </div>
       </div>
     </section>
@@ -413,7 +508,7 @@ function StatItem({
   muted,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   note: string;
   help?: string;
   muted?: boolean;
@@ -427,6 +522,15 @@ function StatItem({
       <p className={`mt-1 text-lg font-bold ${muted ? "text-slate-500" : "text-slate-900"}`}>{value}</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">{note}</p>
     </div>
+  );
+}
+
+function RangeValue({ main, range }: { main: string; range: string }) {
+  return (
+    <span className="block">
+      <span className="block">{main}</span>
+      <span className="mt-0.5 block text-sm font-semibold text-slate-600">({range})</span>
+    </span>
   );
 }
 
@@ -477,6 +581,41 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
       <h3 className="mb-3 font-semibold text-slate-900">{title}</h3>
       {children}
     </div>
+  );
+}
+
+function LanguageTrendSummary({
+  stats,
+  totalReviews,
+  positiveRate,
+}: {
+  stats: LanguageStat[];
+  totalReviews: number;
+  positiveRate: number;
+}) {
+  const insights = getLanguageInsights(stats, totalReviews, positiveRate);
+
+  return (
+    <Panel title="言語別傾向サマリー">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {insights.map((insight) => (
+          <div
+            key={insight.label}
+            className={`rounded-lg border p-3 ${
+              insight.tone === "good"
+                ? "border-emerald-100 bg-emerald-50"
+                : insight.tone === "warn"
+                  ? "border-amber-100 bg-amber-50"
+                  : "border-slate-100 bg-slate-50"
+            }`}
+          >
+            <p className="text-xs font-medium text-slate-500">{insight.label}</p>
+            <p className="mt-1 text-base font-bold text-slate-900">{insight.value}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">{insight.detail}</p>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }
 

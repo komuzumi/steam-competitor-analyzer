@@ -100,6 +100,41 @@ export interface AISummaryResult {
   frequentComplaints: string;
   planningInsights: string;
   globalExpansionNotes: string;
+  issueCategories: AIReviewIssueCategory[];
+}
+
+export type ReviewIssueCategory =
+  | "bugs_stability"
+  | "controls"
+  | "price_volume"
+  | "difficulty"
+  | "multiplayer_online"
+  | "localization"
+  | "content_shortage"
+  | "other";
+
+export interface AIReviewIssueCategory {
+  category: ReviewIssueCategory;
+  label: string;
+  severity: "high" | "medium" | "low";
+  mentions: number;
+  summary: string;
+  opportunity: string;
+}
+
+export interface AISampleMeta {
+  mode: "representative" | "full_compressed";
+  language: string;
+  languageLabel: string;
+  reviewCount: number;
+  positiveCount: number;
+  negativeCount: number;
+  positiveRate: number;
+  averagePlaytimeHours: number | null;
+  oldestReviewDate: string | null;
+  newestReviewDate: string | null;
+  topLanguages: { language: string; count: number }[];
+  selectionRule: string;
 }
 
 export interface CurrencyPriceInfo {
@@ -138,6 +173,104 @@ export interface GameAnalysis {
   editions: EditionInfo[];
   reviewSamples: { text: string; language: string; votedUp: boolean; playtime: number }[];
   aiSummary?: AISummaryResult;
+}
+
+export interface AudienceOverlapGame {
+  appId: string;
+  name: string;
+  headerImage: string;
+  classification: AudienceClassification;
+  classificationLabel: string;
+  classificationReason: string;
+  releaseDate: string;
+  price: number;
+  currency: string;
+  totalReviews: number;
+  positiveRate: number;
+  steamPurchaseReviews: number;
+  averagePlaytimeHours: number | null;
+  currentPlayers: number | null;
+  recentReviewActivity7d: RecentReviewActivity;
+  momentumScore: number;
+  momentumLabel: string;
+  momentumReasons: string[];
+  estimatedCopiesSold: number;
+  estimatedGrossRevenue: number;
+  genres: string[];
+  tags: string[];
+  hybridScore: number;
+  reviewOverlapPercent: number;
+  reviewOverlapJaccard: number;
+  sharedReviewers: number;
+  targetReviewerSampleSize: number;
+  candidateReviewerSampleSize: number;
+  tagSimilarity: number;
+  genreSimilarity: number;
+  categorySimilarity: number;
+  reasons: string[];
+  estimateDiagnostics: string[];
+}
+
+export type AudienceOverlapSampleMode = "standard" | "high";
+
+export type AudienceClassification =
+  | "target"
+  | "direct_competitor"
+  | "adjacent_genre"
+  | "surprising_link"
+  | "fanbase_neighbor";
+
+export interface RecentReviewActivity {
+  days: number;
+  reviewCount: number;
+  isCapped: boolean;
+  reviewShareOfTotal: number;
+}
+
+export interface AudienceOverlapResponse {
+  appId: string;
+  generatedAt: string;
+  sourceNote: string;
+  sampleMode: AudienceOverlapSampleMode;
+  sampleLimits: {
+    targetReviewers: number;
+    candidateReviewers: number;
+  };
+  target: {
+    appId: string;
+    name: string;
+    genres: string[];
+    tags: string[];
+    reviewerSampleSize: number;
+  };
+  targetGame: AudienceOverlapGame;
+  alsoPlayed: AudienceOverlapGame[];
+  reviewerOverlap: AudienceOverlapGame[];
+  surprisingOverlap: AudienceOverlapGame[];
+  competitors: AudienceOverlapGame[];
+}
+
+export type DiscoveryMarket = "jp" | "global";
+
+export interface DiscoveryGame {
+  appId: string;
+  name: string;
+  headerImage: string;
+  releaseDate: string;
+  priceText: string;
+  discountText: string | null;
+  sourceRank: number;
+  storeUrl: string;
+  sectionReason: string;
+}
+
+export interface DiscoveryResponse {
+  market: DiscoveryMarket;
+  generatedAt: string;
+  topSellers: DiscoveryGame[];
+  newReleases: DiscoveryGame[];
+  notes: string[];
+  errors?: Partial<Record<"topSellers" | "newReleases", string>>;
 }
 
 export interface PublicReview {
