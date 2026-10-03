@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:steam-reviews": "tsc src/lib/steam-review-request.ts --outDir .test-output --module commonjs --target es2022 --lib es2022,dom --skipLibCheck && node --test tests/steam-review-request.test.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

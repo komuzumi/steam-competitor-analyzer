@@ -513,40 +513,54 @@ export default function ReviewTools({ data }: Props) {
       setFetchProgress({ fetched: 0, total: targetTotal });
       const params = new URLSearchParams({ appId: data.appId, language });
       const res = await fetch(`/api/reviews/stream?${params}`);
-      if (!res.ok || !res.body) throw new Error(`レビュー取得に失敗しました: ${res.status}`);
+      if (!res.ok || !res.body) {
+        if (res.status === 429) throw new Error("サーバーが混雑しています（429）。少し時間を置いて、もう一度試してください。");
+        throw new Error(`レビュー取得に失敗しました: ${res.status}`);
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
       const reviews: PublicReview[] = [];
+      let completed = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = JSON.parse(line) as
-            | { type: "meta"; total: number }
-            | { type: "review"; review: PublicReview; fetched: number; total: number }
-            | { type: "progress"; fetched: number; total: number }
-            | { type: "done"; fetched: number; total: number }
-            | { type: "error"; message: string };
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line) as
+              | { type: "meta"; total: number }
+              | { type: "review"; review: PublicReview; fetched: number; total: number }
+              | { type: "progress"; fetched: number; total: number }
+              | { type: "done"; fetched: number; total: number }
+              | { type: "retry"; message: string }
+              | { type: "error"; message: string };
 
-          if (event.type === "error") throw new Error(event.message);
-          if (event.type === "meta") setFetchProgress({ fetched: 0, total: event.total });
-          if (event.type === "review") {
-            reviews.push(event.review);
-            if (event.fetched % 500 === 0) setFetchProgress({ fetched: event.fetched, total: event.total });
-          }
-          if (event.type === "progress" || event.type === "done") {
-            setFetchProgress({ fetched: event.fetched, total: event.total });
+            if (event.type === "error") throw new Error(event.message);
+            if (event.type === "retry") setCsvStatus(event.message);
+            if (event.type === "meta") setFetchProgress({ fetched: 0, total: event.total });
+            if (event.type === "review") {
+              reviews.push(event.review);
+              if (event.fetched % 500 === 0) setFetchProgress({ fetched: event.fetched, total: event.total });
+            }
+            if (event.type === "progress" || event.type === "done") {
+              setCsvStatus("");
+              setFetchProgress({ fetched: event.fetched, total: event.total });
+            }
+            if (event.type === "done") completed = true;
           }
         }
+        if (!completed) throw new Error("レビュー取得の通信が途中で切れました。時間を置いてもう一度試してください。");
+      } finally {
+        if (!completed) await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
       }
 
       setReviewCaches((prev) => ({ ...prev, [language]: reviews }));

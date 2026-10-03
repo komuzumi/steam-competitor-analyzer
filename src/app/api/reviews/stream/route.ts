@@ -23,9 +23,15 @@ export async function GET(req: NextRequest) {
   }
 
   const encoder = new TextEncoder();
+  const abortController = new AbortController();
+  const abort = () => abortController.abort();
+  req.signal.addEventListener("abort", abort, { once: true });
+  if (req.signal.aborted) abort();
+  let closed = false;
   const stream = new ReadableStream({
     async start(controller) {
       const send = (payload: unknown) => {
+        if (closed || abortController.signal.aborted) return;
         controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
       };
 
@@ -35,13 +41,20 @@ export async function GET(req: NextRequest) {
         let total = 0;
         const seenCursors = new Set<string>();
 
-        while (true) {
+        while (!abortController.signal.aborted) {
           const result = await fetchReviews(appId, {
             cursor,
             filter: "recent",
             language,
             reviewType,
             numPerPage: 100,
+            signal: abortController.signal,
+            onRetry: ({ attempt, delayMs }) => send({
+              type: "retry",
+              fetched,
+              total,
+              message: `Steam側の取得制限のため約${Math.ceil(delayMs / 1000)}秒待って再試行します（${attempt}/2）。`,
+            }),
           });
 
           if (fetched === 0) {
@@ -70,8 +83,17 @@ export async function GET(req: NextRequest) {
         const message = err instanceof Error ? err.message : "レビュー取得に失敗しました";
         send({ type: "error", message });
       } finally {
-        controller.close();
+        req.signal.removeEventListener("abort", abort);
+        if (!closed) {
+          closed = true;
+          controller.close();
+        }
       }
+    },
+    cancel() {
+      closed = true;
+      abort();
+      req.signal.removeEventListener("abort", abort);
     },
   });
 

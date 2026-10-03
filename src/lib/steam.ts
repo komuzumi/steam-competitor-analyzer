@@ -1,4 +1,5 @@
 import { DiscoveryGame, DiscoveryMarket, LanguageStat, PublicReview, SteamReview } from "@/types";
+import { fetchSteamReviewResponse, ReviewRetry } from "./steam-review-request";
 
 const STEAM_STORE_API = "https://store.steampowered.com/api";
 const STEAM_REVIEW_API = "https://store.steampowered.com/appreviews";
@@ -504,7 +505,7 @@ export async function fetchReviewSummary(
     review_type: "all",
   });
 
-  const res = await fetchWithTimeout(`${STEAM_REVIEW_API}/${appId}?${params}`);
+  const res = await fetchSteamReviewResponse(`${STEAM_REVIEW_API}/${appId}?${params}`);
   if (!res.ok) throw new Error(`Steam Review API error: ${res.status}`);
 
   const data = await res.json();
@@ -584,6 +585,8 @@ export async function fetchReviews(
     reviewType?: "all" | "positive" | "negative";
     numPerPage?: number;
     dayRange?: number;
+    signal?: AbortSignal;
+    onRetry?: (retry: ReviewRetry) => void;
   } = {},
 ): Promise<{
   reviews: SteamReview[];
@@ -604,7 +607,10 @@ export async function fetchReviews(
 
   if (options.dayRange) params.set("day_range", String(options.dayRange));
 
-  const res = await fetchWithTimeout(`${STEAM_REVIEW_API}/${appId}?${params}`);
+  const res = await fetchSteamReviewResponse(`${STEAM_REVIEW_API}/${appId}?${params}`, {
+    signal: options.signal,
+    onRetry: options.onRetry,
+  });
   if (!res.ok) throw new Error(`Steam Review API error: ${res.status}`);
 
   const data = await res.json();
