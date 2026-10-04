@@ -1,5 +1,6 @@
 import { DiscoveryGame, DiscoveryMarket, LanguageStat, PublicReview, SteamReview } from "@/types";
 import { fetchSteamReviewResponse, ReviewRetry } from "./steam-review-request";
+import { apiSignal, checkApiActive } from "./api-protection";
 
 const STEAM_STORE_API = "https://store.steampowered.com/api";
 const STEAM_REVIEW_API = "https://store.steampowered.com/appreviews";
@@ -8,13 +9,14 @@ const STEAM_CURRENT_PLAYERS_API = "https://api.steampowered.com/ISteamUserStats/
 const STEAM_FETCH_TIMEOUT_MS = 15_000;
 
 async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = STEAM_FETCH_TIMEOUT_MS): Promise<Response> {
+  checkApiActive();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await fetch(url, {
       ...init,
-      signal: controller.signal,
+      signal: apiSignal(controller.signal),
     });
   } finally {
     clearTimeout(timeout);
@@ -59,14 +61,6 @@ export function getLanguageDisplayName(language: string): string {
   if (language === "all") return "All languages";
   if (language === "other") return "Other";
   return LANGUAGE_NAME_BY_CODE.get(language) ?? language;
-}
-
-export function extractAppId(input: string): string | null {
-  const trimmed = input.trim();
-  if (/^\d+$/.test(trimmed)) return trimmed;
-
-  const match = trimmed.match(/store\.steampowered\.com\/app\/(\d+)/);
-  return match ? match[1] : null;
 }
 
 interface PackageSub {

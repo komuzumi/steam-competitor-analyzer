@@ -9,6 +9,8 @@ yarn-error.log
 .env.*
 !.env.local.example
 coverage
+.test-output
+tests
 out
 build
 *.tsbuildinfo

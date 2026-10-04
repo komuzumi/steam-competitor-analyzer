@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildAudienceOverlap } from "@/lib/audienceOverlap";
 import { CURRENCY_OPTIONS, CurrencyCode } from "@/lib/currency";
 import { AudienceOverlapSampleMode } from "@/types";
+import { protectApi } from "@/lib/api-protection";
 
 export const maxDuration = 300;
 
@@ -14,12 +15,16 @@ function isSampleMode(value: string | null): value is AudienceOverlapSampleMode 
 }
 
 export async function GET(req: NextRequest) {
+  return protectApi(req, "audience", () => analyzeAudience(req));
+}
+
+async function analyzeAudience(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const appId = searchParams.get("appId");
   const currencyParam = searchParams.get("currency");
   const sampleModeParam = searchParams.get("sampleMode");
 
-  if (!appId || !/^\d+$/.test(appId)) {
+  if (!appId || !/^\d{1,10}$/.test(appId)) {
     return NextResponse.json({ error: "AppIDを指定してください。" }, { status: 400 });
   }
 

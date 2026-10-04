@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AISampleMeta, AISummaryResult, GameAnalysis, PublicReview } from "@/types";
+import { downloadReviewChunks, ReviewCheckpoint } from "@/lib/review-download";
 
 type AiMode = "representative" | "full_compressed";
 
 const GEMINI_KEY_STORAGE = "steam-analyzer-gemini-api-key";
-const AI_CLIENT_TIMEOUT_MS = 120_000;
+const AI_CLIENT_TIMEOUT_MS = 180_000;
 
 function formatNumber(value: number): string {
   return value.toLocaleString("ja-JP");
@@ -62,16 +63,6 @@ function downloadText(filename: string, text: string, type: string) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function downloadFromUrl(url: string, filename: string) {
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
 }
 
 function safeFilename(name: string): string {
@@ -440,6 +431,10 @@ export default function ReviewTools({ data }: Props) {
   const [aiExportStatus, setAiExportStatus] = useState<string>("");
   const [aiSampleMeta, setAiSampleMeta] = useState<AISampleMeta | null>(null);
   const inFlightFullFetch = useRef<Partial<Record<string, Promise<PublicReview[]>>>>({});
+  const reviewCheckpoints = useRef<Record<string, ReviewCheckpoint<PublicReview>>>({});
+  const reviewAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => reviewAbortRef.current?.abort(), []);
 
   useEffect(() => {
     if (geminiApiKey) window.localStorage.setItem(GEMINI_KEY_STORAGE, geminiApiKey);
@@ -511,58 +506,28 @@ export default function ReviewTools({ data }: Props) {
       setIsFetchingReviews(true);
       setCsvStatus("");
       setFetchProgress({ fetched: 0, total: targetTotal });
-      const params = new URLSearchParams({ appId: data.appId, language });
-      const res = await fetch(`/api/reviews/stream?${params}`);
-      if (!res.ok || !res.body) {
-        if (res.status === 429) throw new Error("サーバーが混雑しています（429）。少し時間を置いて、もう一度試してください。");
-        throw new Error(`レビュー取得に失敗しました: ${res.status}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      const reviews: PublicReview[] = [];
-      let completed = false;
-
+      const checkpoint = reviewCheckpoints.current[language] ??= {
+        reviews: [], cursor: "*", fetched: 0, total: targetTotal, complete: false,
+      };
+      const abort = new AbortController();
+      reviewAbortRef.current = abort;
+      const stopAfter = window.setTimeout(() => abort.abort(), 20 * 60_000);
+      let reviews: PublicReview[];
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            const event = JSON.parse(line) as
-              | { type: "meta"; total: number }
-              | { type: "review"; review: PublicReview; fetched: number; total: number }
-              | { type: "progress"; fetched: number; total: number }
-              | { type: "done"; fetched: number; total: number }
-              | { type: "retry"; message: string }
-              | { type: "error"; message: string };
-
-            if (event.type === "error") throw new Error(event.message);
-            if (event.type === "retry") setCsvStatus(event.message);
-            if (event.type === "meta") setFetchProgress({ fetched: 0, total: event.total });
-            if (event.type === "review") {
-              reviews.push(event.review);
-              if (event.fetched % 500 === 0) setFetchProgress({ fetched: event.fetched, total: event.total });
-            }
-            if (event.type === "progress" || event.type === "done") {
-              setCsvStatus("");
-              setFetchProgress({ fetched: event.fetched, total: event.total });
-            }
-            if (event.type === "done") completed = true;
-          }
-        }
-        if (!completed) throw new Error("レビュー取得の通信が途中で切れました。時間を置いてもう一度試してください。");
+        reviews = await downloadReviewChunks({
+          appId: data.appId, language, checkpoint, signal: abort.signal,
+          onProgress: (fetched, total) => setFetchProgress({ fetched, total }),
+          onStatus: setCsvStatus,
+        });
+      } catch (error) {
+        const reason = error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")
+          ? "レビュー取得を中断しました。"
+          : error instanceof Error ? error.message : "レビュー取得に失敗しました。";
+        throw new Error(`${reason} ${formatNumber(checkpoint.reviews.length)}件を一時保持しています。全文レビュー取得またはCSVを押すと続きから再開します。`);
       } finally {
-        if (!completed) await reader.cancel().catch(() => undefined);
-        reader.releaseLock();
+        window.clearTimeout(stopAfter);
+        reviewAbortRef.current = null;
       }
-
       setReviewCaches((prev) => ({ ...prev, [language]: reviews }));
       return reviews;
     })();
@@ -592,7 +557,7 @@ export default function ReviewTools({ data }: Props) {
     setAiSampleMeta(null);
 
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
+    let timeout: number | undefined;
 
     try {
       let localSampleMeta: AISampleMeta | null = null;
@@ -622,6 +587,7 @@ export default function ReviewTools({ data }: Props) {
         setAiStatus(`${selectedLanguageLabel}の代表レビュー200件を取得し、Geminiで分析中...`);
       }
 
+      timeout = window.setTimeout(() => controller.abort(), AI_CLIENT_TIMEOUT_MS);
       const res = await fetch("/api/ai/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -654,24 +620,15 @@ export default function ReviewTools({ data }: Props) {
   async function handleCsvDownload() {
     setCsvStatus("");
     try {
-      if (!visibleReviewCache) {
-        const params = new URLSearchParams({ appId: data.appId, name: data.name, language: selectedLanguage });
-        downloadFromUrl(
-          `/api/reviews/csv?${params}`,
-          `${data.appId}-${safeFilename(data.name)}-${reviewFilenameSuffix}.csv`,
-        );
-        setCsvStatus(`${visibleReviewCacheLabel}のCSVダウンロードを開始しました。未取得のためサーバーから直接生成します。`);
-        return;
-      }
-
-      const csv = makeCsv(visibleReviewCache);
+      const reviews = visibleReviewCache ?? await fetchFullReviews(selectedLanguage);
+      const csv = makeCsv(reviews);
       downloadText(
         `${data.appId}-${safeFilename(data.name)}-${reviewFilenameSuffix}.csv`,
         csv,
         "text/csv;charset=utf-8",
       );
       setCsvStatus(
-        `${visibleReviewCacheLabel}のページ内一時レビュー${formatNumber(visibleReviewCache.length)}件からCSVを生成しました`,
+        `${visibleReviewCacheLabel}のページ内一時レビュー${formatNumber(reviews.length)}件からCSVを生成しました`,
       );
     } catch (err) {
       setCsvStatus(err instanceof Error ? err.message : "CSV生成に失敗しました");
@@ -830,6 +787,12 @@ export default function ReviewTools({ data }: Props) {
           >
             CSV
           </button>
+          {isFetchingReviews && (
+            <button type="button" onClick={() => reviewAbortRef.current?.abort()}
+              className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50">
+              取得を中断
+            </button>
+          )}
         </div>
 
         <div className="mt-3 space-y-1 text-xs text-slate-500">

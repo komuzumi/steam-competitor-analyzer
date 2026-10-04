@@ -15,14 +15,21 @@ import { estimateRecentSteamCopiesFromReviews, estimateSteamMarket, salesEstimat
 import { fetchHistoricalLow } from "@/lib/itad";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { CurrencyPriceInfo, EditionInfo, GameAnalysis, SSEEvent } from "@/types";
+import { apiSignal, checkApiActive, protectApi, readLimitedJson } from "@/lib/api-protection";
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
+  return protectApi(req, "analyze", () => analyze(req));
+}
+
+async function analyze(req: NextRequest) {
+  const body = await readLimitedJson<{ appIds?: unknown }>(req, 4096);
+  if (!body || typeof body !== "object") return Response.json({ error: "AppIDを指定してください。" }, { status: 400 });
   const { appIds } = body as { appIds: string[] };
 
-  if (!appIds || !Array.isArray(appIds) || appIds.length === 0 || appIds.length > 5) {
+  if (!appIds || !Array.isArray(appIds) || appIds.length === 0 || appIds.length > 5 ||
+      appIds.some((id) => typeof id !== "string" || !/^\d{1,10}$/.test(id))) {
     return new Response(JSON.stringify({ error: "AppIDは1から5件で指定してください" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
@@ -30,17 +37,19 @@ export async function POST(req: NextRequest) {
   }
 
   const encoder = new TextEncoder();
+  const signal = apiSignal(req.signal);
+  let isClosed = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream({
     async start(controller) {
-      let isClosed = false;
       let latestProgress: Extract<SSEEvent, { type: "progress" }> | null = null;
       function send(event: SSEEvent) {
-        if (isClosed) return;
+        if (isClosed || signal?.aborted) return;
         if (event.type === "progress") latestProgress = event;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       }
 
-      const heartbeat = setInterval(() => {
+      heartbeat = setInterval(() => {
         if (!latestProgress) return;
         send({
           ...latestProgress,
@@ -50,6 +59,7 @@ export async function POST(req: NextRequest) {
 
       try {
         for (const appId of appIds) {
+          checkApiActive();
           try {
             send({ type: "progress", appId, phase: "ストア情報と価格を取得中..." });
 
@@ -168,7 +178,7 @@ export async function POST(req: NextRequest) {
           } catch (err) {
             const message = err instanceof Error ? err.message : "不明なエラー";
             send({ type: "error", appId, message });
-            console.error(`AppID ${appId} の分析エラー:`, err);
+            if (signal?.aborted) break;
           }
         }
 
@@ -176,9 +186,10 @@ export async function POST(req: NextRequest) {
       } finally {
         clearInterval(heartbeat);
         isClosed = true;
-        controller.close();
+        try { controller.close(); } catch { /* The client may have cancelled the stream. */ }
       }
     },
+    cancel() { isClosed = true; clearInterval(heartbeat); },
   });
 
   return new Response(stream, {

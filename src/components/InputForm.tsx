@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { extractAppId } from "@/lib/steam";
+import { extractAppId } from "@/lib/steam-input";
 
 interface Props {
   onSubmit: (appIds: string[]) => void;

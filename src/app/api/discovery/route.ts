@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { fetchSteamDiscoveryList } from "@/lib/steam";
 import { DiscoveryMarket, DiscoveryResponse } from "@/types";
+import { protectApi } from "@/lib/api-protection";
 
 export const maxDuration = 60;
 
@@ -13,6 +14,10 @@ function errorMessage(error: unknown): string {
 }
 
 export async function GET(req: NextRequest) {
+  return protectApi(req, "discovery", () => discovery(req));
+}
+
+async function discovery(req: NextRequest) {
   const market = normalizeMarket(req.nextUrl.searchParams.get("market"));
   const [topSellersResult, newReleasesResult] = await Promise.allSettled([
     fetchSteamDiscoveryList("top_sellers", market),

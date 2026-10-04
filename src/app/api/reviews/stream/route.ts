@@ -1,106 +1,72 @@
 import { NextRequest } from "next/server";
-import { fetchReviews, toPublicReview } from "@/lib/steam";
+import { fetchReviews, toPublicReview, STEAM_LANGUAGES } from "@/lib/steam";
+import { apiSignal, protectApi } from "@/lib/api-protection";
+import { collectReviewChunk } from "@/lib/review-chunks";
 
 export const maxDuration = 300;
 
-type ReviewType = "all" | "positive" | "negative";
-
-function parseReviewType(value: string | null): ReviewType {
-  if (value === "positive" || value === "negative") return value;
-  return "all";
+export async function GET(req: NextRequest) {
+  return protectApi(req, "reviews", () => streamReviews(req));
 }
 
-export async function GET(req: NextRequest) {
-  const appId = req.nextUrl.searchParams.get("appId");
-  const language = req.nextUrl.searchParams.get("language") || "all";
-  const reviewType = parseReviewType(req.nextUrl.searchParams.get("reviewType"));
-
-  if (!appId || !/^\d+$/.test(appId)) {
-    return new Response(JSON.stringify({ error: "AppIDを指定してください" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
+async function streamReviews(req: NextRequest) {
+  if (req.nextUrl.searchParams.get("chunked") !== "1") {
+    return new Response(`${JSON.stringify({ type: "error", message: "アプリが更新されました。ページを再読み込みしてから全文レビューを取得してください。" })}\n`, {
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" },
     });
   }
-
+  const appId = req.nextUrl.searchParams.get("appId");
+  const language = req.nextUrl.searchParams.get("language") || "all";
+  const cursor = req.nextUrl.searchParams.get("cursor") || "*";
+  const rawType = req.nextUrl.searchParams.get("reviewType") || "all";
+  const reviewType = rawType === "positive" || rawType === "negative" ? rawType : "all";
+  const offset = Number(req.nextUrl.searchParams.get("offset") || 0);
+  if (!appId || !/^\d{1,10}$/.test(appId) || cursor.length > 1024 ||
+      !Number.isSafeInteger(offset) || offset < 0 || offset > 100_000_000 ||
+      (language !== "all" && !STEAM_LANGUAGES.some((item) => item.code === language))) {
+    return Response.json({ error: "AppID、言語、取得位置の指定を確認してください。" }, { status: 400 });
+  }
   const encoder = new TextEncoder();
-  const abortController = new AbortController();
-  const abort = () => abortController.abort();
-  req.signal.addEventListener("abort", abort, { once: true });
-  if (req.signal.aborted) abort();
+  const controller = new AbortController();
+  const signal = apiSignal(controller.signal)!;
   let closed = false;
   const stream = new ReadableStream({
-    async start(controller) {
+    async start(destination) {
       const send = (payload: unknown) => {
-        if (closed || abortController.signal.aborted) return;
-        controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+        if (!closed && !signal.aborted) destination.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
       };
-
+      let fetched = offset;
+      let total = 0;
       try {
-        let cursor = "*";
-        let fetched = 0;
-        let total = 0;
-        const seenCursors = new Set<string>();
-
-        while (!abortController.signal.aborted) {
-          const result = await fetchReviews(appId, {
-            cursor,
-            filter: "recent",
-            language,
-            reviewType,
-            numPerPage: 100,
-            signal: abortController.signal,
-            onRetry: ({ attempt, delayMs }) => send({
-              type: "retry",
-              fetched,
-              total,
-              message: `Steam側の取得制限のため約${Math.ceil(delayMs / 1000)}秒待って再試行します（${attempt}/2）。`,
-            }),
-          });
-
-          if (fetched === 0) {
-            total = result.total_reviews;
+        const result = await collectReviewChunk({
+          cursor,
+          signal,
+          fetchPage: async (position) => {
+            const page = await fetchReviews(appId, {
+              cursor: position, filter: "recent", language, reviewType, numPerPage: 100, signal,
+              onRetry: ({ delayMs }) => send({ type: "retry", message: `Steamの取得制限のため約${Math.ceil(delayMs / 1000)}秒待って再試行します。` }),
+            });
+            total = page.total_reviews || total;
             send({ type: "meta", total, language, reviewType });
-          }
-
-          for (const review of result.reviews) {
-            fetched++;
-            send({ type: "review", review: toPublicReview(review), fetched, total });
-          }
-
-          cursor = result.cursor;
-          send({ type: "progress", fetched, total });
-
-          if (!result.reviews.length) break;
-          if (total > 0 && fetched >= total) break;
-          if (!cursor || cursor === "*" || seenCursors.has(cursor)) break;
-
-          seenCursors.add(cursor);
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        }
-
-        send({ type: "done", fetched, total });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "レビュー取得に失敗しました";
-        send({ type: "error", message });
+            return { ...page, reviews: page.reviews.map(toPublicReview) };
+          },
+          pageBytes: (page) => page.reviews.reduce((sum, review) => sum + encoder.encode(JSON.stringify({ type: "review", review, fetched: fetched + 100, total })).byteLength + 1, 0),
+          sendPage: (page) => {
+            for (const review of page.reviews) {
+              fetched++;
+              send({ type: "review", review, fetched, total });
+            }
+            send({ type: "progress", fetched, total });
+          },
+        });
+        send({ type: "done", fetched, total, complete: result.complete, nextCursor: result.cursor });
+      } catch (error) {
+        send({ type: "error", message: error instanceof Error ? error.message : "レビュー取得に失敗しました。" });
       } finally {
-        req.signal.removeEventListener("abort", abort);
-        if (!closed) {
-          closed = true;
-          controller.close();
-        }
+        if (!closed) { closed = true; destination.close(); }
       }
     },
-    cancel() {
-      closed = true;
-      abort();
-      req.signal.removeEventListener("abort", abort);
-    },
+    cancel() { closed = true; controller.abort(); },
   });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
+  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });
 }

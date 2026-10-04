@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { summarizeReviewCorpus, summarizeReviews } from "@/lib/openai";
 import { fetchRepresentativeReviews, getLanguageDisplayName } from "@/lib/steam";
 import { AISampleMeta, SteamReview } from "@/types";
+import { ApiLimitError, apiErrorResponse, protectApi, readLimitedJson } from "@/lib/api-protection";
 
 export const maxDuration = 300;
 const REVIEW_FETCH_TIMEOUT_MS = 60_000;
@@ -83,9 +84,16 @@ function buildRepresentativeSampleMeta(
 }
 
 export async function POST(req: NextRequest) {
+  return protectApi(req, "ai", () => analyzeAi(req));
+}
+
+async function analyzeAi(req: NextRequest) {
   try {
-    const body = (await req.json()) as RequestBody;
-    if (!body.appId || !/^\d+$/.test(body.appId) || !body.gameName) {
+    const body = await readLimitedJson<RequestBody>(req, 512 * 1024);
+    if (!body || typeof body !== "object" || typeof body.appId !== "string" || !/^\d{1,10}$/.test(body.appId) ||
+        typeof body.gameName !== "string" || !body.gameName || body.gameName.length > 300 ||
+        (body.geminiApiKey !== undefined && (typeof body.geminiApiKey !== "string" || body.geminiApiKey.length > 256)) ||
+        (body.language !== undefined && (typeof body.language !== "string" || !/^[a-z]{2,20}$/.test(body.language)))) {
       return new Response(JSON.stringify({ error: "AppIDとタイトル名を指定してください" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
@@ -130,7 +138,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (body.mode === "full_compressed") {
-      if (!body.corpus || body.corpus.length < 100) {
+      if (typeof body.corpus !== "string" || body.corpus.length < 100 || body.corpus.length > 160_000) {
         return new Response(JSON.stringify({ error: "AI分析用のレビュー要約が不足しています" }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -155,7 +163,11 @@ export async function POST(req: NextRequest) {
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "AI分析に失敗しました";
+    if (err instanceof ApiLimitError) return apiErrorResponse(err);
+    // SDK errors can contain request URLs or credentials. Never echo them verbatim.
+    const message = err instanceof Error && err.message.includes("タイムアウト")
+      ? "AI分析がタイムアウトしました。時間を置いてもう一度試してください。"
+      : "AI分析に失敗しました。Gemini APIキーと利用上限を確認して、時間を置いて再実行してください。";
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

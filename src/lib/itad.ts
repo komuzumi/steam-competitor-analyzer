@@ -1,4 +1,5 @@
 // IsThereAnyDeal API v2 連携
+import { apiSignal, checkApiActive } from "./api-protection";
 
 interface ITADHistoricalLow {
   price: number;
@@ -8,13 +9,14 @@ interface ITADHistoricalLow {
 const ITAD_FETCH_TIMEOUT_MS = 10_000;
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  checkApiActive();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ITAD_FETCH_TIMEOUT_MS);
 
   try {
     return await fetch(url, {
       ...init,
-      signal: controller.signal,
+      signal: apiSignal(controller.signal),
     });
   } finally {
     clearTimeout(timeout);

@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AISummaryResult, PublicReview, SteamReview } from "@/types";
+import { apiSignal, checkApiActive } from "./api-protection";
 
 function getModel(apiKey: string) {
   const normalizedApiKey = apiKey.trim();
@@ -140,7 +141,10 @@ export async function summarizeReviewCorpus(
   apiKey: string,
 ): Promise<AISummaryResult> {
   const model = getModel(apiKey);
-  const result = await model.generateContent(buildPrompt(gameName, reviewCorpus, corpusLabel));
+  checkApiActive();
+  const result = await model.generateContent(buildPrompt(gameName, reviewCorpus, corpusLabel), {
+    signal: apiSignal(), timeout: 90_000,
+  });
   const content = result.response.text();
 
   if (!content) {

@@ -1,3 +1,5 @@
+import { apiSignal, checkApiActive } from "./api-protection";
+
 export interface ReviewRetry {
   attempt: number;
   delayMs: number;
@@ -65,6 +67,8 @@ export function createSteamReviewRequester(dependencies: {
   let queue = Promise.resolve();
 
   return async (url: string, options: ReviewRequestOptions = {}): Promise<Response> => {
+    checkApiActive();
+    options = { ...options, signal: apiSignal(options.signal) };
     const turn = queue;
     let release!: () => void;
     const completion = new Promise<void>((resolve) => { release = resolve; });

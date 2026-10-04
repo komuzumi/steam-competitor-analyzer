@@ -60,6 +60,8 @@ docker run --rm -p 8080:8080 steam-competitor-analyzer
 
 ## 課金について
 
+APIの大量アクセス対策と、DBなし制限の限界は[大量アクセスと運用費用の対策](./abuse-protection.md)を参照してください。レビューは1万件以上でも分割取得でき、CSVはブラウザで生成します。
+
 Cloud Runは低アクセスなら無料枠内で始められる可能性があります。ただし、外部通信量、Cloud Build、Artifact Registry、アクセス増加、長時間実行で課金が発生する可能性があります。公開前に予算アラートを設定してください。
 
 ## 独自ドメイン
